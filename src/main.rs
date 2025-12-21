@@ -72,10 +72,12 @@ impl Exectutable{
     fn build(mut self,mut offset: usize, disk: &mut Disk) {
         let mut bytecode: Vec<i16>=vec![];
         let mut fnmap: HashMap<usize,usize>=HashMap::new();
+        let header_len=4;
+        let insertion_jump_len=2;
         //loader
         offset+=255;
         //headers
-        offset+=5;
+        offset+=header_len+insertion_jump_len;
         let mut mainloc=0;
         let data_sec=offset as i16+self.fns.iter_mut().enumerate().fold(
             offset,
@@ -123,27 +125,29 @@ impl Exectutable{
                 bytecode.extend(block.iter().map(|x|*x));
             }
         }
-        Self::insert_bytecode_into_disk(&self,disk,bytecode,offset,mainloc);
+        Self::insert_bytecode_into_disk(&self,disk,bytecode,offset,mainloc,header_len+insertion_jump_len);
     }
-    fn insert_bytecode_into_disk(&self,disk: &mut Disk,bytecode: Vec<i16>,mut offset:usize,entrypoint:usize) {
+    fn insert_bytecode_into_disk(&self,disk: &mut Disk,bytecode: Vec<i16>,mut offset:usize,entrypoint:usize,header_len:usize) {
         //Executable Structure
-        //-data sector
-        //-data len
         //-bytecode len
+        //-bytecode sector count
+        //-data len
+        //-data sector count
         //bytecode
         //data
 
         //(total exe code len/max sector data).ceil()
-        let sectors=((offset+bytecode.len()) as f32/i16::MAX as f32).ceil() as usize;
-        let headers=vec![sectors,self.data.len(),bytecode.len()+2];
+        let code_sectors=((offset+bytecode.len()) as f32/i16::MAX as f32).ceil() as usize;
+        let data_sectors=((self.data.len()) as f32/i16::MAX as f32).ceil() as usize;
+        let headers=vec![bytecode.len()+2,code_sectors,self.data.len(),data_sectors];
         let insertion_jump=vec![pack_command(Jump),entrypoint as i16];
-        let executable= flatten_vec(vec![headers.iter().map(|x|*x as i16).collect(), insertion_jump, bytecode]);
+        let executable= flatten_vec(vec![headers.iter().map(|x|*x as i16).collect(), insertion_jump.clone(), bytecode]);
         //remove headers for these calcs
-        offset-=5;
+        offset-=header_len;
         let base_sector=(offset as f32/i16::MAX as f32).floor() as usize;
         let bsector_offset=(offset as f32%i16::MAX as f32) as usize;
         let data_sector_count=(self.data.len() as f32/i16::MAX as f32).ceil() as usize;
-        for i in base_sector..sectors{
+        for i in base_sector..code_sectors{
             if i==base_sector{
                 let insert_len=match executable.len()<i16::MAX as usize{
                     true=>executable.len(),
@@ -163,13 +167,13 @@ impl Exectutable{
             }
         }
 
-        for i in sectors..sectors+data_sector_count{
+        for i in code_sectors..code_sectors+data_sector_count{
             resize_vec(i+1,disk,DiskSection{
                 section_type: DiskSectionType::Data,
                 id:-1,
                 data:vec![],
             });
-            let iteration=i-sectors;
+            let iteration=i-code_sectors;
             let data_start=iteration*i16::MAX as usize;
             let data_end=match self.data.len()<(iteration+1)*i16::MAX as usize{
                 false=>(iteration+1)*i16::MAX as usize,
