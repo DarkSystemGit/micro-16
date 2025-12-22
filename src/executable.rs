@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use crate::{Bytecode, CommandType, Disk, DiskSection, DiskSectionType};
+use crate::CommandType::Exit;
 use crate::util::*;
 
 #[derive(Debug,Clone)]
@@ -17,7 +18,7 @@ impl Executable {
             fns: Vec::new(),
             loader: flatten_vec(vec![
                 gen_io_read(256,0,6),
-
+                vec![pack_command(Exit)]
 
             ])
         }

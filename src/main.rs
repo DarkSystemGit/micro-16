@@ -283,7 +283,7 @@ fn run_bytecode(disk: &mut Disk,debug:bool) -> Core {
             CommandType::Return=>{
                 //return(returned_byte_count)
                 let args= take_bytes(&mut machine, 1);
-                machine.ip=machine.stack.remove(machine.stack.len()-(args[0] as usize),&mut machine.srp) as usize;
+                machine.ip=machine.stack.remove(machine.srp-(args[0] as usize),&mut machine.srp) as usize;
                 if machine.debug{
                     println!("Return {}",args[0]);
                 }
@@ -364,7 +364,7 @@ impl Core {
             r4: 0,
             f1: 0.0,
             f2: 0.0,
-            srp:0,
+            srp:2,
             on: true,
             debug:false,
             memory: Vec::new(),
@@ -385,22 +385,29 @@ impl Stack {
         self.data.len()
     }
     fn push(&mut self, x: f32,srp:&mut usize) {
-        self.data.push(x);
+        if *srp>=self.data.len(){
+            self.data.resize(*srp,0.0);
+        }
+        self.data.insert(*srp,x);
         *srp+=1;
     }
     fn pop(&mut self, srp:&mut usize) -> f32 {
         self.remove(*srp -1,srp)
     }
     fn extend(&mut self, data: Vec<f32>,srp:&mut usize) {
+        for (i,item) in data.iter().enumerate(){
+            self.data.insert(*srp+i,*item);
+        }
         *srp+=data.len();
-        self.data.extend(data);
     }
     fn remove(&mut self, index: usize,srp:&mut usize)-> f32 {
         *srp-=1;
         self.data.remove(index)
     }
     fn resize(&mut self, size: usize,srp:&mut usize){
-        *srp+=self.data.len()-size;
+        if size<=self.data.len() {
+            *srp=size;
+        }
         self.data.resize(size,0.0);
     }
 }
