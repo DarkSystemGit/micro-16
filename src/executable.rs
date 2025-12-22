@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::{Bytecode, CommandType, Disk, DiskSection, DiskSectionType};
-use crate::CommandType::Exit;
+use crate::CommandType::{Exit, Mod};
 use crate::util::*;
 
 #[derive(Debug,Clone)]
@@ -10,15 +10,48 @@ pub(crate) struct Executable {
     fns: Vec<Fn>,
     loader: Vec<i16>
 }
+//Bytecode Executable Structure
+//-mem offset
+//-base sector
+//-bytecode len
+//-bytecode sector count
+//-data len
+//-data sector count
+//bytecode
+//data
 impl Executable {
     pub(crate) fn new() -> Executable {
         Executable {
             data: Vec::new(),
             data_offsets: Vec::new(),
             fns: Vec::new(),
+            //loader loads from base sector to bytecode sector count, taking only bytecode len%i16::MAX for th final sector. 
+            //Then, it loads from bytecode sector count+1 to bytecode sector count+data_sector count, loading only data len%i16::MAX for the final sector
+            //All of this is loaded at mem offset
+            //Pseudocode
+            //let fcount=exec[2]%i16::MAX
+            //let next_mem=exec[0];
+            //for i in exec[1]..exec[1]+(exec[3]-1){
+            //  if i==exec[1]+(exec[3]-1){
+            //      load(i,fcount,next_mem);
+            //      next_mem+=fcount
+            //  }else{
+            //      load(i,i16::MAX,next_mem)
+            //      next_mem+=i16::MAX
+            //  }
+            //}
+            //let dfcount=exec[4];
+            //for i in exec[1]+exec[3]..exec[1]+exec[3]+exec[5]-1{
+            //  if i==exec[1]+exec[3]+exec[5]-1{
+            //     load(i,dfcount,next_mem)
+            //  }else{
+            //      load(i,i16::MAX,next_mem)
+            //      next_mem+=i16::MAX
+            //   }
+            //}
             loader: flatten_vec(vec![
                 gen_io_read(256,0,6),
-                vec![pack_command(Exit)]
+                vec![pack_command(Mod)]
 
             ])
         }
@@ -42,15 +75,7 @@ impl Executable {
         0
     }
     pub(crate) fn build(mut self, mut offset: usize, disk: &mut Disk) {
-        //Executable Structure
-        //-mem offset
-        //-base sector
-        //-bytecode len
-        //-bytecode sector count
-        //-data len
-        //-data sector count
-        //bytecode
-        //data
+
         let mut bytecode: Vec<i16>=vec![];
         let mut fn_map: HashMap<usize,usize>=HashMap::new();
         let header_len=6;
@@ -114,7 +139,8 @@ impl Executable {
         //(total exe code len/max sector data).ceil()
         let code_sectors=((offset+bytecode.len()) as f32/i16::MAX as f32).ceil() as usize;
         let data_sectors=(self.data.len() as f32/i16::MAX as f32).ceil() as usize;
-        let headers=vec![((offset-header_len) as f32/i16::MAX as f32).floor() as usize,offset-header_len,bytecode.len()+2,code_sectors,self.data.len(),data_sectors];
+        //[mem offset,base sector,bytecode len,bytecode sector count, data len, data sector count]
+        let headers=vec![offset-header_len,((offset-header_len) as f32/i16::MAX as f32).floor() as usize,bytecode.len()+2,code_sectors,self.data.len(),data_sectors];
         let insertion_jump=vec![pack_command(CommandType::Jump),entrypoint as i16];
         let executable= flatten_vec(vec![headers.iter().map(|x|*x as i16).collect(), insertion_jump.clone(), bytecode]);
         //remove headers for these calculations
@@ -215,7 +241,9 @@ impl Fn {
         }).collect());
         self.jumps.push(jumps);
         self.constant_accesses.push(constant_usages);
+        if entrypoint{
         self.blocks[0][1]=(self.blocks.len()-1) as i16;
+        }
         self.blocks.len()-1
     }
 }

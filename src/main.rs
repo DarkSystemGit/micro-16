@@ -26,6 +26,7 @@ fn main() {
         data:vec![],
     }] as Disk;
     exe.build(0,&mut disk);
+    dbg!(&disk);
     println!("{:?}", run_bytecode(&mut disk,true));
 }
 
@@ -111,9 +112,9 @@ fn run_bytecode(disk: &mut Disk,debug:bool) -> Core {
             }
             CommandType::Mod => {
                 let args = take_bytes(&mut machine, 2);
-                machine.f1 = args[0] % args[1];
+                machine.r1 = (args[0] % args[1]) as i16;
                 if machine.debug{
-                    println!("Modulo {} {} -> {}",args[0],args[1],machine.f1);
+                    println!("Modulo {} {} -> {}",args[0],args[1],machine.r1);
                 }
             }
             CommandType::Pop => {
@@ -305,22 +306,28 @@ fn take_bytes(core: &mut Core, bytecount: i16) -> Vec<f32> {
     for i in 0..bytecount {
         let byte = core.memory[offset + i as usize];
         if byte == i16::MIN {
+            match core.memory[offset+i as usize+1]{
+                0=>{
             bytes.push(
                 unpack_float(&[
-                    core.memory[offset + 1 + i as usize],
                     core.memory[offset + 2 + i as usize],
+                    core.memory[offset + 3 + i as usize],
                 ])
                 .expect("Couldn't convert bytes from i16 to float"),
             );
-            offset += 2;
-            real_byte_count += 3;
-        } else if byte == i16::MAX {
-            bytes.push(convert_reg_byte_to_command(
-                core.memory[offset + 1 + i as usize],
-                core,
-            ));
-            offset += 1;
-            real_byte_count += 2;
+            offset += 3;
+            real_byte_count += 4;
+            }
+                1=>{
+                    bytes.push(convert_reg_byte_to_command(
+                        core.memory[offset + 2 + i as usize],
+                        core,
+                    ));
+                    offset += 2;
+                    real_byte_count += 3;
+                }
+                _=>{}
+            }
         } else {
             bytes.push(byte as f32);
             real_byte_count += 1;
@@ -332,10 +339,10 @@ fn take_bytes(core: &mut Core, bytecount: i16) -> Vec<f32> {
 fn take_registers(core: &mut Core, count: i16) -> Vec<i16> {
     let mut bytes: Vec<i16> = Vec::new();
     for i in 0..count {
-        let byte = core.memory[core.ip + 1 + (i * 2) as usize];
+        let byte = core.memory[core.ip + 2 + (i * 3) as usize];
         bytes.push(byte);
     }
-    core.ip += (count * 2) as usize;
+    core.ip += (count * 3) as usize;
     bytes
 }
 #[derive(Debug)]

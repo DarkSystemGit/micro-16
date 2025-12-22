@@ -15,7 +15,7 @@ pub fn flatten_vec(i: Vec<Vec<i16>>) -> Vec<i16> {
     i.into_iter().flat_map(|row| row).collect()
 }
 pub fn pack_float(f: f32) -> Vec<i16> {
-    let mut rvec = vec![i16::MIN];
+    let mut rvec = vec![i16::MIN,0];
     rvec.extend(convert_float(f));
     rvec
 }
@@ -112,7 +112,8 @@ pub fn pack_command(c: CommandType) -> i16 {
 }
 pub fn pack_register(r: CommandType) -> Vec<i16> {
     vec![
-        i16::MAX,
+        i16::MIN,
+        1,
         match r {
             CommandType::R1 => 1,
             CommandType::R2 => 2,
