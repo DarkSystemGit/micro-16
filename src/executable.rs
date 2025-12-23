@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::{Bytecode, CommandType, Disk, DiskSection, DiskSectionType};
-use crate::CommandType::{Exit, Mod};
+use crate::CommandType::{Exit};
 use crate::util::*;
 
 #[derive(Debug,Clone)]
@@ -25,7 +25,7 @@ impl Executable {
             data: Vec::new(),
             data_offsets: Vec::new(),
             fns: Vec::new(),
-            //loader loads from base sector to bytecode sector count, taking only bytecode len%i16::MAX for th final sector. 
+            //loader loads from base sector to bytecode sector count, taking only bytecode len%i16::MAX for th final sector.
             //Then, it loads from bytecode sector count+1 to bytecode sector count+data_sector count, loading only data len%i16::MAX for the final sector
             //All of this is loaded at mem offset
             //Pseudocode
@@ -49,10 +49,44 @@ impl Executable {
             //      next_mem+=i16::MAX
             //   }
             //}
+            //Assembly Pesudocode
+            //Load exec[2]->r1
+            //Mod r1,i16::Max->r2
+            //Load exec[0]->r3
+            //Load exec[1]->r4
+            //Load exec[3]->r5
+            //Sub r5,1->r5
+            //Add r4,r5->r5
+            //mov 0->r6
+            //loopConditon:
+            //Sub r5,r4
+            //jz endLoop
+            //loop:
+            //Sub r4,r6
+            //jz non_end;
+            //Push r6
+            //Push r3
+            //Push r2
+            //IO 0,0
+            //copyStackToMem(r2)
+            //Add r3,r2->r3
+            //jump increment;
+            //non_end:
+            //Push r6
+            //Pysh r3
+            //Push i16::Max
+            //IO 0,0
+            //copyStackToMem(r2)
+            //increment:
+            //inc r6;
+            //jump loopCondition
+            //endLoop:
+            //
             loader: flatten_vec(vec![
-                gen_io_read(256,0,6),
-                vec![pack_command(Mod)]
+                gen_io_read(256,0,6,256),
+                //R4 is bytecode sector count, R2 is next_mem, R3 is base sector,
 
+                vec![pack_command(Exit)]
             ])
         }
     }

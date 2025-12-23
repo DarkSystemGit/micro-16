@@ -27,7 +27,10 @@ fn main() {
     }] as Disk;
     exe.build(0,&mut disk);
     dbg!(&disk);
-    println!("{:?}", run_bytecode(&mut disk,true));
+    let mut machine=Machine::new(true);
+    machine.devices[0].contents=RawDevice::Disk(disk);
+    machine.run();
+    //println!("{:?}");
 }
 
 enum Bytecode{
@@ -36,269 +39,233 @@ enum Bytecode{
     Float(f32),
     Int(i16),
 }
-fn run_bytecode(disk: &mut Disk,debug:bool) -> Core {
-    let mut machine: Core = Core::new();
-    machine.debug=debug;
-    if disk[0].data.len() >= 256 {
-        machine.memory = disk[0].data[0..256].to_vec();
-    } else {
-        machine.memory = disk[0].data.clone();
-    }
-    while machine.on {
-        let byte = convert_int_to_command(take_bytes(&mut machine, 1)[0] as i16);
-        match byte {
-            CommandType::Add => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] + args[1]) as i16;
-                if machine.debug{
-                    println!("Add {} {} -> {}",args[0],args[1],machine.r1);
-                }
+fn exec_bytecode(machine: &mut Machine){
+    let byte = convert_int_to_command(take_bytes(&mut machine.core, 1)[0] as i16);
+    let disk=if let RawDevice::Disk(disk)=&mut machine.devices[0].contents{
+        Some(disk)
+    }else{None}.expect("Could not get disk");
+    match byte {
+        CommandType::Add => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] + args[1]) as i16;
+            if machine.debug{
+                println!("Add {} {} -> {}", args[0], args[1], machine.core.r1);
             }
-            CommandType::Sub => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] - args[1]) as i16;
-                if machine.debug{
-                    println!("Sub {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Mul => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] * args[1]) as i16;
-                if machine.debug{
-                    println!("Mul {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Div => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] / args[1]) as i16;
-                if machine.debug{
-                    println!("Div {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Greater => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] > args[1]) as i16;
-                if machine.debug{
-                    println!("GreaterThan {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Addf => {
-                let args = take_bytes(&mut machine, 2);
-                machine.f1 = args[0] + args[1];
-                if machine.debug{
-                    println!("Addf {} {} -> {}",args[0],args[1],machine.f1);
-                }
-            }
-            CommandType::Subf => {
-                let args = take_bytes(&mut machine, 2);
-                machine.f1 = args[0] - args[1];
-                if machine.debug{
-                    println!("Subf {} {} -> {}",args[0],args[1],machine.f1);
-                }
-            }
-            CommandType::Mulf => {
-                let args = take_bytes(&mut machine, 2);
-                machine.f1 = args[0] * args[1];
-                if machine.debug{
-                    println!("Mulf {} {} -> {}",args[0],args[1],machine.f1);
-                }
-            }
-            CommandType::Divf => {
-                let args = take_bytes(&mut machine, 2);
-                machine.f1 = args[0] / args[1];
-                if machine.debug{
-                    println!("Divf {} {} -> {}",args[0],args[1],machine.f1);
-                }
-            }
-            CommandType::Mod => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] % args[1]) as i16;
-                if machine.debug{
-                    println!("Modulo {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Pop => {
-                let val = machine.stack.pop(&mut machine.srp);
-                let reg=take_registers(&mut machine, 1)[0];
-                set_reg(reg, &mut machine, val);
-                if machine.debug{
-                    println!("Pop {} -> R{}",val,reg);
-                }
-            }
-            CommandType::LessThan => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = (args[0] < args[1]) as i16;
-                if machine.debug{
-                    println!("LessThan {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Jump => {
-                let addr = take_bytes(&mut machine, 1)[0];
-                machine.ip = addr as usize;
-                if machine.debug{
-                    println!("Jump {}",addr);
-                }
-            }
-            CommandType::And => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = args[0] as i16 & args[1] as i16;
-                if machine.debug{
-                    println!("And {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Or => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = args[0] as i16 | args[1] as i16;
-                if machine.debug{
-                    println!("Or {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Not => {
-                let args = take_bytes(&mut machine, 1);
-                machine.r1 = !(args[0] as i16);
-                if machine.debug{
-                    println!("Not {} -> {}",args[0],machine.r1);
-                }
-            }
-            CommandType::Xor => {
-                let args = take_bytes(&mut machine, 2);
-                machine.r1 = args[0] as i16 ^ (args[1] as i16);
-                if machine.debug{
-                    println!("Xor {} {} -> {}",args[0],args[1],machine.r1);
-                }
-            }
-            CommandType::Push => {
-                let args = take_bytes(&mut machine, 1);
-                machine.stack.push(args[0],&mut machine.srp);
-                if machine.debug{
-                    println!("Push {}",args[0]);
-                }
-            }
-            CommandType::Mov => {
-                let args = take_bytes(&mut machine, 1);
-                let reg=take_registers(&mut machine, 1)[0];
-                set_reg(reg, &mut machine, args[0]);
-                if machine.debug{
-                    println!("Mov {} -> R{}",args[0],reg);
-                }
-            }
-            CommandType::JumpNotZero => {
-                let args = take_bytes(&mut machine, 2);
-                if args[1] != 0.0 {
-                    machine.ip = args[0] as usize;
-                }
-                if machine.debug{
-                    println!("JumpNotZero {} {}",args[0],args[1]);
-                }
-
-            }
-            CommandType::Load => {
-                let args = take_bytes(&mut machine, 1);
-                let val = machine.memory[args[0] as usize] as f32;
-                let reg=take_registers(&mut machine, 1)[0];
-                set_reg(reg, &mut machine, val);
-                if machine.debug{
-                    println!("Load %{} -> R{}",args[0],reg);
-                }
-            }
-            CommandType::Store => {
-                let args = take_bytes(&mut machine, 2);
-                if args[1].fract() == 0.0 {
-                machine.memory[args[0] as usize] = args[1] as i16;}else{
-                    let f = convert_float(args[1]);
-                    machine
-                        .memory
-                        .splice(args[0] as usize..args[0] as usize + f.len(), f);
-                }
-                if machine.debug{
-                    println!("Store {} -> %{}",args[1],args[0]);
-                }
-            }
-            CommandType::Exit => {
-                machine.on = false;
-                if machine.debug{
-                    println!("Exit");
-                }
-            }
-            CommandType::Loadf => {
-                let args = take_bytes(&mut machine, 1);
-                let val = unpack_float(&machine.memory[args[0] as usize..args[0] as usize + 1usize])
-                    .expect(&format!("Couldn't get float at memory address {}", args[0]));
-                let reg=take_registers(&mut machine, 1)[0];
-                set_reg(reg, &mut machine, val);
-                if machine.debug{
-                    println!("Loadf %{} -> R{}",args[0],reg);
-                }
-            }
-            CommandType::IO => {
-                //io(device,command), driverags are on stack
-                let args = take_bytes(&mut machine, 2);
-                if machine.debug{
-                    println!("IO {} {}",args[0],args[1]);
-                }
-                match args[0] as i16 {
-                    0 => {
-                        //disk
-                        match args[1] as i16 {
-                            0 => {
-                                //read(section,addr,len)
-                                let cargs = pop_stack(&mut machine, 3);
-                                let range = (cargs[1] as usize)..(cargs[1] + cargs[2]) as usize;
-                                machine.stack.extend(
-                                    disk[cargs[0] as usize].data[range]
-                                        .to_vec()
-                                        .iter()
-                                        .map(|x| *x as f32).collect(),&mut machine.srp
-                                );
-                                if machine.debug{
-                                    println!("IO.disk.read {} {} {}",cargs[0],cargs[1],cargs[2]);
-                                }
-                            }
-                            1 => {
-                                //write(section,addr,byte)
-                                let cargs = pop_stack(&mut machine, 3);
-                                disk[cargs[0] as usize].data[cargs[1] as usize] = cargs[2] as i16;
-                                if machine.debug{
-                                    println!("IO.disk.write {} -> disk.%[{} {}]",cargs[2],cargs[0],cargs[1]);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            CommandType::Call=>{
-                //call(fnptr,argcount,...args)
-                let cargs = take_bytes(&mut machine, 2);
-                let fnargs= take_bytes(&mut machine, cargs[1] as i16);
-                machine.stack.push(machine.ip as f32,&mut machine.srp);
-                for i in &fnargs{
-                    machine.stack.push(*i,&mut machine.srp);
-                }
-                machine.ip=cargs[0] as usize;
-                if machine.debug{
-                    println!("Call {} Array[{},{:?}]",cargs[0],cargs[1],fnargs);
-                }
-            }
-            CommandType::Return=>{
-                //return(returned_byte_count)
-                let args= take_bytes(&mut machine, 1);
-                machine.ip=machine.stack.remove(machine.srp-(args[0] as usize),&mut machine.srp) as usize;
-                if machine.debug{
-                    println!("Return {}",args[0]);
-                }
-            }
-            CommandType::NOP => {
-                if machine.debug{
-                    println!("NOP");
-                }
-            }
-            _ => {}
         }
+        CommandType::Sub => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] - args[1]) as i16;
+            if machine.debug{
+                println!("Sub {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Mul => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] * args[1]) as i16;
+            if machine.debug{
+                println!("Mul {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Div => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] / args[1]) as i16;
+            if machine.debug{
+                println!("Div {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Greater => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] > args[1]) as i16;
+            if machine.debug{
+                println!("GreaterThan {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Addf => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.f1 = args[0] + args[1];
+            if machine.debug{
+                println!("Addf {} {} -> {}", args[0], args[1], machine.core.f1);
+            }
+        }
+        CommandType::Subf => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.f1 = args[0] - args[1];
+            if machine.debug{
+                println!("Subf {} {} -> {}", args[0], args[1], machine.core.f1);
+            }
+        }
+        CommandType::Mulf => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.f1 = args[0] * args[1];
+            if machine.debug{
+                println!("Mulf {} {} -> {}", args[0], args[1], machine.core.f1);
+            }
+        }
+        CommandType::Divf => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.f1 = args[0] / args[1];
+            if machine.debug{
+                println!("Divf {} {} -> {}", args[0], args[1], machine.core.f1);
+            }
+        }
+        CommandType::Mod => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] % args[1]) as i16;
+            if machine.debug{
+                println!("Modulo {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Pop => {
+            let val = machine.core.stack.pop(&mut machine.core.srp);
+            let reg=take_registers(&mut machine.core, 1)[0];
+            set_reg(reg, &mut machine.core, val);
+            if machine.debug{
+                println!("Pop {} -> R{}",val,reg);
+            }
+        }
+        CommandType::LessThan => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = (args[0] < args[1]) as i16;
+            if machine.debug{
+                println!("LessThan {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Jump => {
+            let addr = take_bytes(&mut machine.core, 1)[0];
+            machine.core.ip = addr as usize;
+            if machine.debug{
+                println!("Jump {}",addr);
+            }
+        }
+        CommandType::And => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = args[0] as i16 & args[1] as i16;
+            if machine.debug{
+                println!("And {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Or => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = args[0] as i16 | args[1] as i16;
+            if machine.debug{
+                println!("Or {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Not => {
+            let args = take_bytes(&mut machine.core, 1);
+            machine.core.r1 = !(args[0] as i16);
+            if machine.debug{
+                println!("Not {} -> {}", args[0], machine.core.r1);
+            }
+        }
+        CommandType::Xor => {
+            let args = take_bytes(&mut machine.core, 2);
+            machine.core.r1 = args[0] as i16 ^ (args[1] as i16);
+            if machine.debug{
+                println!("Xor {} {} -> {}", args[0], args[1], machine.core.r1);
+            }
+        }
+        CommandType::Push => {
+            let args = take_bytes(&mut machine.core, 1);
+            machine.core.stack.push(args[0], &mut machine.core.srp);
+            if machine.debug{
+                println!("Push {}",args[0]);
+            }
+        }
+        CommandType::Mov => {
+            let args = take_bytes(&mut machine.core, 1);
+            let reg=take_registers(&mut machine.core, 1)[0];
+            set_reg(reg, &mut machine.core, args[0]);
+            if machine.debug{
+                println!("Mov {} -> R{}",args[0],reg);
+            }
+        }
+        CommandType::JumpNotZero => {
+            let args = take_bytes(&mut machine.core, 2);
+            if args[1] != 0.0 {
+                machine.core.ip = args[0] as usize;
+            }
+            if machine.debug{
+                println!("JumpNotZero {} {}",args[0],args[1]);
+            }
+
+        }
+        CommandType::Load => {
+            let args = take_bytes(&mut machine.core, 1);
+            let val = machine.core.memory[args[0] as usize] as f32;
+            let reg=take_registers(&mut machine.core, 1)[0];
+            set_reg(reg,&mut  machine.core, val);
+            if machine.debug{
+                println!("Load %{} -> R{}",args[0],reg);
+            }
+        }
+        CommandType::Store => {
+            let args = take_bytes(&mut machine.core, 2);
+            if args[1].fract() == 0.0 {
+                machine.core.memory[args[0] as usize] = args[1] as i16;}else{
+                let f = convert_float(args[1]);
+                machine.core
+                    .memory
+                    .splice(args[0] as usize..args[0] as usize + f.len(), f);
+            }
+            if machine.debug{
+                println!("Store {} -> %{}",args[1],args[0]);
+            }
+        }
+        CommandType::Exit => {
+            machine.core.on = false;
+            if machine.debug{
+                println!("Exit");
+            }
+        }
+        CommandType::Loadf => {
+            let args = take_bytes(&mut machine.core, 1);
+            let val = unpack_float(&machine.core.memory[args[0] as usize..args[0] as usize + 1usize])
+                .expect(&format!("Couldn't get float at memory address {}", args[0]));
+            let reg=take_registers(&mut machine.core, 1)[0];
+            set_reg(reg, &mut machine.core, val);
+            if machine.debug{
+                println!("Loadf %{} -> R{}",args[0],reg);
+            }
+        }
+        CommandType::IO => {
+            //io(device,command), driverags are on stack
+            let args = take_bytes(&mut machine.core, 2);
+            if machine.debug{
+                println!("IO {} {}",args[0],args[1]);
+            }
+            let driver=(machine.devices[args[0] as usize].driver.clone())(machine,args[1] as i16);
+        }
+        CommandType::Call=>{
+            //call(fnptr,argcount,...args)
+            let cargs = take_bytes(&mut machine.core, 2);
+            let fnargs= take_bytes(&mut machine.core, cargs[1] as i16);
+            machine.core.stack.push(machine.core.ip as f32, &mut machine.core.srp);
+            for i in &fnargs{
+                machine.core.stack.push(*i, &mut machine.core.srp);
+            }
+            machine.core.ip=cargs[0] as usize;
+            if machine.debug{
+                println!("Call {} Array[{},{:?}]",cargs[0],cargs[1],fnargs);
+            }
+        }
+        CommandType::Return=>{
+            //return(returned_byte_count)
+            let args= take_bytes(&mut machine.core, 1);
+            machine.core.ip= machine.core.stack.remove(machine.core.srp-(args[0] as usize), &mut machine.core.srp) as usize;
+            if machine.debug{
+                println!("Return {}",args[0]);
+            }
+        }
+        CommandType::NOP => {
+            if machine.debug{
+                println!("NOP");
+            }
+        }
+        _ => {}
     }
-    machine
 }
+
 fn take_bytes(core: &mut Core, bytecount: i16) -> Vec<f32> {
     let mut offset = core.ip;
     let mut real_byte_count = 0;
@@ -344,6 +311,76 @@ fn take_registers(core: &mut Core, count: i16) -> Vec<i16> {
     }
     core.ip += (count * 3) as usize;
     bytes
+}
+struct Machine{
+    devices: Vec<Device>,
+    core: Core,
+    debug: bool,
+    on: bool,
+}
+impl Machine{
+    fn new(debug:bool) -> Machine {
+        let m=Machine{
+            devices:vec![Device{
+                driver: |machine,command|{
+                    let disk=if let RawDevice::Disk(disk)=&mut machine.devices[0].contents{
+                        Some(disk)
+                    }else{None}.expect("Could not get disk");
+                    match command as i16 {
+                        0 => {
+                            //read(section,addr,len,dest)
+                            let cargs = pop_stack(&mut machine.core, 4);
+                           for i in (cargs[1] as usize)..(cargs[1] + cargs[2]) as usize{
+                               if machine.core.memory.len()<=cargs[3] as usize+(i-cargs[1] as usize){
+                                   machine.core.memory.resize(cargs[3] as usize+(i-cargs[1] as usize)+1,0);
+                               }
+                               machine.core.memory[cargs[3] as usize+(i-cargs[1] as usize)]=disk[cargs[0] as usize].data[i];
+                           }
+                            if machine.debug{
+                                println!("IO.disk.read {} {} {} ->%{}",cargs[0],cargs[1],cargs[2],cargs[3]);
+                            }
+                        }
+                        1 => {
+                            //write(section,addr,byte)
+                            let cargs = pop_stack(&mut machine.core, 3);
+                            disk[cargs[0] as usize].data[cargs[1] as usize] = cargs[2] as i16;
+                            if machine.debug{
+                                println!("IO.disk.write {} -> disk.%[{} {}]",cargs[2],cargs[0],cargs[1]);
+                            }
+                        }
+                        _ => {}
+                    }
+
+                },
+                contents: RawDevice::Disk(Vec::new()),
+            }],
+            core: Core::new(),
+            debug,
+            on: true,
+        };
+        m
+    }
+    fn run(&mut self){
+        if let RawDevice::Disk(disk)=&mut self.devices[0].contents{
+        if disk[0].data.len() >= 256 {
+            self.core.memory = disk[0].data[0..256].to_vec();
+        } else {
+            self.core.memory = disk[0].data.clone();
+        }
+        }else{
+            println!("No Disk Plugged In");
+        }
+        while self.on {
+            exec_bytecode(self)
+        }
+    }
+}
+struct Device{
+    driver: fn(machine: &mut Machine,command: i16),
+    contents: RawDevice
+}
+enum RawDevice{
+    Disk(Disk),
 }
 #[derive(Debug)]
 struct Core {

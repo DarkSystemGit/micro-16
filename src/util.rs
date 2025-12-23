@@ -1,10 +1,20 @@
 use byteorder::{ByteOrder, LittleEndian};
-use crate::CommandType::{Push, IO};
+use crate::CommandType::{Add, Mov, Pop, Push, IO, R1, SRP};
 use crate::{CommandType, Core};
 
-pub fn gen_io_read(addr:i16, sector:i16, len:i16) ->Vec<i16>{
-    vec![pack_command(Push),len,pack_command(Push),addr,pack_command(Push),sector,pack_command(IO),0,0]
+pub fn gen_io_read(addr:i16, sector:i16, len:i16,dist:i16) ->Vec<i16>{
+    vec![pack_command(Push),dist,pack_command(Push),len,pack_command(Push),addr,pack_command(Push),sector,pack_command(IO),0,0]
 }
+pub fn gen_srp_pop(srp_change:i16,val_reg: CommandType)->Vec<i16>{
+    flatten_vec(vec![
+        vec![pack_command(Add),srp_change],pack_register(SRP),
+        vec![pack_command(Mov)],pack_register(R1),pack_register(SRP),
+        vec![pack_command(Pop)],pack_register(val_reg),
+        vec![pack_command(Add),-1*srp_change],pack_register(SRP),
+        vec![pack_command(Mov)],pack_register(R1),pack_register(SRP),
+    ])
+}
+
 pub fn resize_vec<T>(len:usize,vec:&mut Vec<T>,fill:T) where T: Clone{
     if vec.len()<=len{
         vec.resize(len,fill);
