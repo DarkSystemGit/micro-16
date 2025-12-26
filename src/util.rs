@@ -1,19 +1,6 @@
-use byteorder::{ByteOrder, LittleEndian};
-use crate::CommandType::{Add, Mov, Pop, Push, IO, R1, SRP};
 use crate::{CommandType, Core};
+use byteorder::{ByteOrder, LittleEndian};
 
-pub fn gen_io_read(addr:i16, sector:i16, len:i16,dist:i16) ->Vec<i16>{
-    vec![pack_command(Push),dist,pack_command(Push),len,pack_command(Push),addr,pack_command(Push),sector,pack_command(IO),0,0]
-}
-pub fn gen_srp_pop(srp_change:i16,val_reg: CommandType)->Vec<i16>{
-    flatten_vec(vec![
-        vec![pack_command(Add),srp_change],pack_register(SRP),
-        vec![pack_command(Mov)],pack_register(R1),pack_register(SRP),
-        vec![pack_command(Pop)],pack_register(val_reg),
-        vec![pack_command(Add),-1*srp_change],pack_register(SRP),
-        vec![pack_command(Mov)],pack_register(R1),pack_register(SRP),
-    ])
-}
 
 pub fn resize_vec<T>(len:usize,vec:&mut Vec<T>,fill:T) where T: Clone{
     if vec.len()<=len{
@@ -56,7 +43,7 @@ pub fn pop_stack(machine: &mut Core,bytes: i32)->Vec<f32> {
 }
 pub fn convert_int_to_command(i: i16) -> CommandType {
     match i {
-        0 => CommandType::Add,
+        32 => CommandType::Add,
         1 => CommandType::Sub,
         2 => CommandType::Mul,
         3 => CommandType::Div,
@@ -81,16 +68,17 @@ pub fn convert_int_to_command(i: i16) -> CommandType {
         23 => CommandType::Exit,
         30 => CommandType::IP,
         31 => CommandType::SP,
-        32 => CommandType::NOP,
+        0 => CommandType::NOP,
         33 => CommandType::IO,
         34 => CommandType::Call,
         35=>CommandType::Return,
+        36=>CommandType::JumpZero,
         _ => CommandType::NOP,
     }
 }
 pub fn pack_command(c: CommandType) -> i16 {
     match c {
-        CommandType::Add => 0,
+        CommandType::Add => 32,
         CommandType::Sub => 1,
         CommandType::Mul => 2,
         CommandType::Div => 3,
@@ -113,10 +101,11 @@ pub fn pack_command(c: CommandType) -> i16 {
         CommandType::Greater => 21,
         CommandType::LessThan => 22,
         CommandType::Exit => 23,
-        CommandType::NOP => 32,
+        CommandType::NOP => 0,
         CommandType::IO => 33,
         CommandType::Call=>34,
         CommandType::Return=>35,
+        CommandType::JumpZero=>36,
         _ => 0,
     }
 }

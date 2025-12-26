@@ -1,6 +1,9 @@
 mod executable;
 mod util;
+
+use std::fmt::format;
 use std::vec;
+use prompted::input;
 use crate::CommandType::{Exit, JumpNotZero, Load, Mov, Subf, NOP};
 use crate::DiskSectionType::Entrypoint;
 use crate::util::*;
@@ -9,7 +12,7 @@ fn main() {
     let mut main_fn =Fn::new("main".to_string());
     let mut exe=Executable::new();
     exe.add_constant(vec![4]);
-    let nop_block = main_fn.add_block(vec![Bytecode::Command(NOP), Bytecode::Command(Exit)], false) as i16;
+    let nop_block = main_fn.add_block(vec![Bytecode::Command(NOP), Bytecode::Command(Exit)], false,false,false) as i16;
     main_fn.add_block(vec![
         Bytecode::Command(CommandType::Add), Bytecode::Int(1), Bytecode::Int(2),
         Bytecode::Command(Mov), Bytecode::Register(CommandType::R1), Bytecode::Register(CommandType::F1),
@@ -18,8 +21,9 @@ fn main() {
         Bytecode::Command(Subf), Bytecode::Register(CommandType::F1), Bytecode::Register(CommandType::F2),
         Bytecode::Command(JumpNotZero), Bytecode::Int(nop_block),
         Bytecode::Command(Exit)
-    ], true);
+    ], true,false,false);
     exe.add_fn(main_fn);
+    dbg!(&exe);
     let mut disk: Disk=vec![DiskSection{
         section_type: Entrypoint,
         id:0,
@@ -44,6 +48,9 @@ fn exec_bytecode(machine: &mut Machine){
     let disk=if let RawDevice::Disk(disk)=&mut machine.devices[0].contents{
         Some(disk)
     }else{None}.expect("Could not get disk");
+    if machine.debug{
+        print!("%{:07}: ",machine.core.ip-1);
+    }
     match byte {
         CommandType::Add => {
             let args = take_bytes(&mut machine.core, 2);
@@ -189,6 +196,15 @@ fn exec_bytecode(machine: &mut Machine){
                 println!("JumpNotZero {} {}",args[0],args[1]);
             }
 
+        }
+        CommandType::JumpZero=>{
+            let args = take_bytes(&mut machine.core, 2);
+            if args[1] == 0.0 {
+                machine.core.ip = args[0] as usize;
+            }
+            if machine.debug{
+                println!("JumpZero {} {}",args[0],args[1]);
+            }
         }
         CommandType::Load => {
             let args = take_bytes(&mut machine.core, 1);
@@ -370,8 +386,58 @@ impl Machine{
         }else{
             println!("No Disk Plugged In");
         }
+        let mut debug_console=true;
+        let mut breakpoints=Vec::new();
         while self.on {
+            if self.debug&&debug_console || (breakpoints.contains(&self.core.ip)){
+                let input=input!("%{}>", self.core.ip);
+                let command=input.split_whitespace().collect::<Vec<&str>>();
+                if command.len()==0{
+                    exec_bytecode(self)
+                }else{
+                match command[0] {
+                    "step"=>{exec_bytecode(self)},
+                    "stack"=>{
+                        println!("{:?}",self.core.stack.data)
+                    },
+                    "exitConsole"=>{
+                        debug_console=false;
+                        exec_bytecode(self);
+                    },
+                    "breakpoint"=>{
+                        breakpoints.push(command[1].parse::<usize>().expect("Could not parse breakpoint loc"));
+                    }
+                    "device"=>{
+                        let device=command[1].parse::<usize>().expect("Invalid device ID");
+                        println!("{:?}",self.devices[device].contents)
+                    }
+                    "registers"=>{
+                        println!("R1: {}, R2: {}, R3: {}, R4: {}, F1: {}, F2: {}, SP: {}, SRP: {}, IP: {}",self.core.r1,self.core.r2,self.core.r3,self.core.r4,self.core.f1,self.core.f2,self.core.stack.len(),self.core.srp,self.core.ip)
+                    },
+                    "readMem"=>{
+                        let loc=command[1].parse::<usize>().expect("Invalid mem loc");
+                        let mut len=command[2].parse::<usize>().expect("Invalid mem len");
+                        if len+loc>=self.core.memory.len(){
+                            len=self.core.memory.len()-loc;
+                        }
+                        let data=&self.core.memory[loc..len+loc];
+                        let mut printedData="".to_string();
+                        for i in 0..(len as f32/50.0).ceil() as usize{
+                            let end=if data.len()>(i+1)*50{
+                                (i+1*50)
+                            }else{
+                                data.len()-1
+                            };
+                            printedData.extend(format!("%{:07}:{}\n",loc+i*50,
+                                                       (&data[i*50..end]).iter().map(|x|format!(" {}",x)).collect::<String>()).chars())
+                        }
+                        println!("{}",printedData)
+                    }
+                    _=>{}
+                }}
+            }else{
             exec_bytecode(self)
+            }
         }
     }
 }
@@ -379,6 +445,7 @@ struct Device{
     driver: fn(machine: &mut Machine,command: i16),
     contents: RawDevice
 }
+#[derive(Debug)]
 enum RawDevice{
     Disk(Disk),
 }
@@ -493,6 +560,7 @@ enum CommandType {
     Mov,
     Jump,
     JumpNotZero,
+    JumpZero,
     Greater,
     LessThan,
     Exit,
