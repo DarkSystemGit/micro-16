@@ -1,7 +1,8 @@
 use crate::util::*;
 use crate::Bytecode::{Command, Int, Register};
 use crate::CommandType::{Add, Jump, JumpNotZero, JumpZero, Load, Mod, Mov, Pop, Push, Sub, IO, R1, R2, R3, R4};
-use crate::{Bytecode, CommandType, Disk, DiskSection, DiskSectionType};
+use crate::{Bytecode, CommandType};
+use crate::devices::disk::{DiskSectionType,Disk,DiskSection};
 use std::collections::HashMap;
 
 #[derive(Debug,Clone)]
@@ -97,7 +98,26 @@ impl Executable {
             max_loader_len: 512,
         }
     }
-    fn default_loader(max_loader_len:i16,header_len:i16)->Vec<i16>{
+    fn default_loader(max_loader_len: i16,header_len:i16) ->Vec<i16>{
+        let mut f =Fn::new("loader".to_string());
+        f.add_block(vec![
+            Command(Push),Int(0),//dest
+            Command(Push),Int(1),//count
+            Command(Push),Int(0),//start sector,
+            Command(IO),Int(0),Int(2),//loadSectors,
+            Command(Load),Int(max_loader_len+3),Register(R1),//exec::bytecode_sector_count,
+            Command(Load),Int(max_loader_len+1),Register(R2),//exec::base_sector
+            Command(Load),Int(max_loader_len+5),Register(R3),//exec::data_sector_count
+            Command(Add),Register(R1),Register(R3),//total sectors
+            Command(Push),Int(0),//dest
+            Command(Push),Register(R1),//count
+            Command(Push),Register(R2),//start sector
+            Command(IO),Int(0),Int(2),//loadSectors
+            Command(Jump),Int(max_loader_len+header_len)
+        ],true,true,true);
+        f.build(0,&HashMap::new(),0,&vec![])
+    }
+    fn _default_loader(max_loader_len:i16,header_len:i16)->Vec<i16>{
         let mut f =Fn::new("loader".to_string());
         let loop_end =f.add_block(vec![Command(Jump), Int(max_loader_len+header_len)], false, true, true) as i16;
         let reg_load =f.add_block(vec![
@@ -118,7 +138,7 @@ impl Executable {
             Command(Sub), Register(R1), Int(1),
             Command(Sub), Register(R1), Register(R4), //is not counter the same as max range
             Command(JumpNotZero), Int(reg_load), Register(R1),
-            Command(Load), Int(max_loader_len+1+4), Register(R1),
+            Command(Load), Int(max_loader_len+4), Register(R1),
             Command(Mod), Register(R1), Int(i16::MAX),
             Command(Push), Register(R2), //dest
             Command(Push), Register(R1), //len
@@ -137,12 +157,12 @@ impl Executable {
             Command(Sub), Register(R1), Int(1),
             Command(Sub), Register(R1), Register(R4), //is counter same as max
             Command(JumpZero), Int(loop_end), Register(R1),
-            Command(Load), Int(max_loader_len+1+3), Register(R1), //exec::bytecode sector count
+            Command(Load), Int(max_loader_len+3), Register(R1), //exec::bytecode sector count
             Command(Add), Register(R3), Register(R1), //base sector+bytecode sector count
             Command(Sub), Register(R1), Int(1),
             Command(Sub), Register(R1), Register(R4), //is counter same as ttl bytecode sectors
             Command(JumpNotZero), Int(data_end), Register(R1),
-            Command(Load), Int(max_loader_len+1+2), Register(R1), //bytecode len
+            Command(Load), Int(max_loader_len+2), Register(R1), //bytecode len
             Command(Add), Int(max_loader_len), Register(R1),
             Command(Mod), Register(R1), Int(i16::MAX), //bytes in final bytecode sector
             Command(Push), Register(R2), //dest
@@ -162,17 +182,17 @@ impl Executable {
         f.blocks[reg_load as usize][relen]= loop_condition;
         f.add_block(vec![
             Command(Push),Int(0),//dest
-            Command(Push),Int(max_loader_len+1+6),//len
+            Command(Push),Int(max_loader_len+6),//len
             Command(Push),Int(0),//addr
             Command(Push),Int(0),//section
             Command(IO),Int(0),Int(0),//read
-            Command(Load),Int(max_loader_len+1+0),Register(R2),//next_mem/exec::mem_offset
+            Command(Load),Int(max_loader_len+0),Register(R2),//next_mem/exec::mem_offset
             Command(Sub),Register(R2),Int(max_loader_len),
             Command(Mov),Register(R1),Register(R2),
-            Command(Load),Int(max_loader_len+1+1),Register(R3),//exec::base_sector
-            Command(Load),Int(max_loader_len+1+3),Register(R4),//exec::bytecode_sector_count
+            Command(Load),Int(max_loader_len+1),Register(R3),//exec::base_sector
+            Command(Load),Int(max_loader_len+3),Register(R4),//exec::bytecode_sector_count
             Command(Add),Register(R3),Register(R4),
-            Command(Load),Int(max_loader_len+1+5),Register(R4), //exec::data_sector_count
+            Command(Load),Int(max_loader_len+5),Register(R4), //exec::data_sector_count
             Command(Add),Register(R1),Register(R4),//total sectors
             Command(Push),Register(R1),//save total sectors
             Command(Mov),Register(R3),Register(R4),//R4 is counter
@@ -205,24 +225,25 @@ impl Executable {
         let header_len=6;
         let insertion_jump_len=2;
         //loader
-        offset+=self.max_loader_len as usize;
+        offset+=self.max_loader_len as usize -1;
         //headers
         offset+=header_len+insertion_jump_len;
         let mut main_loc =0;
         let data_sec=self.fns.iter_mut().enumerate().fold(
-            offset,
+            offset+1,
             |acc,(i,func)|{
                 if func.name=="main"{
                     main_loc =acc;
                 }
                 fn_map.insert(i, acc);
-                acc+func.blocks.iter().map(|b|b.len()-1).sum::<usize>()
+                acc+func.blocks.iter().map(|b|b.len()).sum::<usize>()
             }
         ) as i16;
         //bytecode.push(as i16);
         for (i,func) in self.fns.iter_mut().enumerate(){
             bytecode.extend(func.build(fn_map[&i],&fn_map,data_sec,&self.data_offsets))
         }
+
         Self::insert_bytecode_into_disk(&self, disk, bytecode, offset, main_loc, header_len+insertion_jump_len);
     }
     fn insert_bytecode_into_disk(&self,disk: &mut Disk,bytecode: Vec<i16>,mut offset:usize,entrypoint:usize,header_len:usize) {
@@ -279,9 +300,8 @@ impl Executable {
             };
         }
         let mut loader=self.loader.clone();
-        resize_vec(self.max_loader_len as usize+1,&mut loader,0);
-        disk[0].data.splice(0..(self.max_loader_len) as usize,loader);
-        //dbg!(disk);
+        resize_vec(self.max_loader_len as usize,&mut loader,0);
+        disk[0].data.splice(0..(self.max_loader_len-1) as usize,loader);
     }
 
 }

@@ -1,4 +1,4 @@
-use crate::{CommandType, Core};
+use crate::vm::{CommandType,Core};
 use byteorder::{ByteOrder, LittleEndian};
 
 
