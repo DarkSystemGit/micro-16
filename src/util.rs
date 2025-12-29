@@ -1,18 +1,20 @@
-use crate::vm::{CommandType,Core};
+use crate::vm::{CommandType, Core};
 use byteorder::{ByteOrder, LittleEndian};
 
-
-pub fn resize_vec<T>(len:usize,vec:&mut Vec<T>,fill:T) where T: Clone{
-    if vec.len()<=len{
-        vec.resize(len,fill);
+pub fn resize_vec<T>(len: usize, vec: &mut Vec<T>, fill: T)
+where
+    T: Clone,
+{
+    if vec.len() <= len {
+        vec.resize(len, fill);
     }
 }
 
-pub fn flatten_vec(i: Vec<Vec<i16>>) -> Vec<i16> {
+pub fn flatten_vec<T>(i: Vec<Vec<T>>) -> Vec<T> {
     i.into_iter().flat_map(|row| row).collect()
 }
 pub fn pack_float(f: f32) -> Vec<i16> {
-    let mut rvec = vec![i16::MIN,0];
+    let mut rvec = vec![i16::MIN, 0];
     rvec.extend(convert_float(f));
     rvec
 }
@@ -34,8 +36,8 @@ pub fn convert_float(f: f32) -> Vec<i16> {
         LittleEndian::read_i16(&native[2..4]),
     ]
 }
-pub fn pop_stack(machine: &mut Core,bytes: i32)->Vec<f32> {
-    let mut ret=Vec::new();
+pub fn pop_stack(machine: &mut Core, bytes: i32) -> Vec<f32> {
+    let mut ret = Vec::new();
     for _i in 0..bytes {
         ret.push(machine.stack.pop(&mut machine.srp));
     }
@@ -71,8 +73,8 @@ pub fn convert_int_to_command(i: i16) -> CommandType {
         0 => CommandType::NOP,
         33 => CommandType::IO,
         34 => CommandType::Call,
-        35=>CommandType::Return,
-        36=>CommandType::JumpZero,
+        35 => CommandType::Return,
+        36 => CommandType::JumpZero,
         _ => CommandType::NOP,
     }
 }
@@ -103,9 +105,9 @@ pub fn pack_command(c: CommandType) -> i16 {
         CommandType::Exit => 23,
         CommandType::NOP => 0,
         CommandType::IO => 33,
-        CommandType::Call=>34,
-        CommandType::Return=>35,
-        CommandType::JumpZero=>36,
+        CommandType::Call => 34,
+        CommandType::Return => 35,
+        CommandType::JumpZero => 36,
         _ => 0,
     }
 }
@@ -137,7 +139,7 @@ pub fn convert_reg_byte_to_command(reg: i16, machine: &Core) -> f32 {
         6 => machine.f2,
         7 => machine.ip as f32,
         8 => machine.stack.len() as f32,
-        9=>machine.srp as f32,
+        9 => machine.srp as f32,
         _ => -1.0,
     }
 }
@@ -150,8 +152,8 @@ pub fn set_reg(reg: i16, machine: &mut Core, value: f32) {
         5 => machine.f1 = value,
         6 => machine.f2 = value,
         7 => machine.ip = value as usize,
-        8 => machine.stack.resize(value as usize,&mut machine.srp),
-        9=> machine.srp = value as usize,
+        8 => machine.stack.resize(value as usize, &mut machine.srp),
+        9 => machine.srp = value as usize,
         _ => (),
     }
 }

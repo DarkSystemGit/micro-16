@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arc-swap = "1.8.0"
 byteorder = "1.5.0"
 pixels = "0.15.0"
 prompted = "0.2.8"

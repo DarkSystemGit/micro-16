@@ -63,7 +63,7 @@ fn main() {
             for samples in data.chunks_mut(params.channels_count) {
                 clock = (clock + 1.0) % params.sample_rate as f32;
                 let value =
-                    (clock * 440.0 * 10.0 / params.sample_rate as f32).cos();
+                    (clock * 440.0*(clock%10.0)  / params.sample_rate as f32).sin();
                 for sample in samples {
                     *sample = value;
                 }
