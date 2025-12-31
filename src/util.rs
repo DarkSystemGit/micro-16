@@ -43,6 +43,17 @@ pub fn pop_stack(machine: &mut Core, bytes: i32) -> Vec<f32> {
     }
     ret
 }
+pub fn convert_float_or_int_to_bytes(f: f32) -> Vec<i16> {
+    if f.fract() == 0.0 {
+        vec![f as i16]
+    } else {
+        let native = f.to_ne_bytes();
+        vec![
+            LittleEndian::read_i16(&native[0..2]),
+            LittleEndian::read_i16(&native[2..4]),
+        ]
+    }
+}
 pub fn convert_int_to_command(i: i16) -> CommandType {
     match i {
         32 => CommandType::Add,
@@ -75,6 +86,7 @@ pub fn convert_int_to_command(i: i16) -> CommandType {
         34 => CommandType::Call,
         35 => CommandType::Return,
         36 => CommandType::JumpZero,
+        37 => CommandType::Loadf,
         _ => CommandType::NOP,
     }
 }
@@ -108,6 +120,7 @@ pub fn pack_command(c: CommandType) -> i16 {
         CommandType::Call => 34,
         CommandType::Return => 35,
         CommandType::JumpZero => 36,
+        CommandType::Loadf => 37,
         _ => 0,
     }
 }
