@@ -1,3 +1,4 @@
+use crate::Bytecode;
 use crate::devices;
 use crate::devices::disk::Disk;
 use crate::devices::{Device, RawDevice};
@@ -5,12 +6,6 @@ use crate::util::*;
 use prompted::input;
 use std::ops::Range;
 use std::panic;
-pub enum Bytecode {
-    Command(CommandType),
-    Register(CommandType),
-    Float(f32),
-    Int(i16),
-}
 fn exec_bytecode(machine: &mut Machine) {
     let byte = convert_int_to_command(take_bytes(machine, 1)[0] as i16);
     if machine.debug {

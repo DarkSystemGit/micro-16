@@ -1,12 +1,59 @@
-use crate::Bytecode::{Command, Int, Register};
+use crate::Bytecode::{BlockLoc, Command, ConstantLoc, Float, FunctionRef, Int, Register};
+use crate::CommandType;
 use crate::CommandType::{
     Add, IO, Jump, JumpNotZero, JumpZero, Load, Mod, Mov, Pop, Push, R1, R2, R3, R4, Sub,
 };
 use crate::devices::disk::{Disk, DiskSection, DiskSectionType};
 use crate::util::*;
-use crate::{Bytecode, CommandType};
 use std::collections::HashMap;
-
+pub struct Library {
+    name: String,
+    fns: Vec<Fn>,
+    pub constants: Vec<Vec<i16>>,
+}
+impl Library {
+    pub fn new(name: String) -> Library {
+        Library {
+            name,
+            fns: vec![],
+            constants: vec![],
+        }
+    }
+    pub fn add_constant(&mut self, constant: Vec<i16>) -> usize {
+        self.constants.push(constant);
+        self.constants.len() - 1
+    }
+    pub fn add_fn(&mut self, mut func: Fn) -> usize {
+        func.name = format!("{}::{}", self.name, func.name);
+        func.blocks.iter_mut().for_each(|block| {
+            for i in block.iter_mut() {
+                if let Bytecode::FunctionRef(funcRef) = i {
+                    *i = Bytecode::FunctionRef(
+                        funcRef.replace("self::", &format!("{}::", self.name)),
+                    );
+                }
+            }
+        });
+        self.fns.push(func);
+        self.fns.len() - 1
+    }
+    pub fn link(&self, exe: &mut Executable) {
+        let const_offset = exe.data_offsets.len() as i16;
+        for constant in &self.constants {
+            exe.add_constant(constant.clone());
+        }
+        for mut func in self.fns.clone() {
+            func.blocks.iter_mut().for_each(|block| {
+                for i in block.iter_mut() {
+                    if let Bytecode::ConstantLoc(constant) = i {
+                        *i = Bytecode::ConstantLoc(*constant + const_offset);
+                    }
+                }
+            });
+            exe.add_fn(func);
+        }
+    }
+}
 #[derive(Debug, Clone)]
 pub(crate) struct Executable {
     data: Vec<i16>,
@@ -14,6 +61,16 @@ pub(crate) struct Executable {
     fns: Vec<Fn>,
     loader: Vec<i16>,
     max_loader_len: i16,
+}
+#[derive(Debug, Clone)]
+pub enum Bytecode {
+    Command(CommandType),
+    Register(CommandType),
+    Float(f32),
+    Int(i16),
+    FunctionRef(String),
+    ConstantLoc(i16),
+    BlockLoc(i16),
 }
 //Bytecode Executable Structure
 //-mem offset
@@ -138,223 +195,6 @@ impl Executable {
                 Int(max_loader_len + header_len),
             ],
             true,
-            true,
-            true,
-        );
-        f.build(0, &HashMap::new(), 0, &vec![])
-    }
-    fn _default_loader(max_loader_len: i16, header_len: i16) -> Vec<i16> {
-        let mut f = Fn::new("loader".to_string());
-        let loop_end = f.add_block(
-            vec![Command(Jump), Int(max_loader_len + header_len)],
-            false,
-            true,
-            true,
-        ) as i16;
-        let reg_load = f.add_block(
-            vec![
-                Command(Push),
-                Register(R2), //dest
-                Command(Push),
-                Int(i16::MAX), //len
-                Command(Push),
-                Int(0), //addr
-                Command(Push),
-                Register(R4), //section
-                Command(IO),
-                Int(0),
-                Int(0), //read
-                Command(Add),
-                Register(R2),
-                Int(i16::MAX),
-                Command(Mov),
-                Register(R1),
-                Register(R2),
-                Command(Add),
-                Register(R4),
-                Int(1),
-                Command(Mov),
-                Register(R1),
-                Register(R4),
-                Command(Jump),
-                Int(0),
-            ],
-            false,
-            false,
-            true,
-        ) as i16;
-        let data_end = f.add_block(
-            vec![
-                Command(Pop),
-                Register(R1),
-                Command(Push),
-                Register(R1), //R1 is max range
-                Command(Sub),
-                Register(R1),
-                Int(1),
-                Command(Sub),
-                Register(R1),
-                Register(R4), //is not counter the same as max range
-                Command(JumpNotZero),
-                Int(reg_load),
-                Register(R1),
-                Command(Load),
-                Int(max_loader_len + 4),
-                Register(R1),
-                Command(Mod),
-                Register(R1),
-                Int(i16::MAX),
-                Command(Push),
-                Register(R2), //dest
-                Command(Push),
-                Register(R1), //len
-                Command(Push),
-                Int(0), //addr
-                Command(Push),
-                Register(R4), //section
-                Command(IO),
-                Int(0),
-                Int(0), //read
-                Command(Add),
-                Register(R2),
-                Register(R1),
-                Command(Mov),
-                Register(R1),
-                Register(R2),
-                Command(Add),
-                Int(1),
-                Register(R4),
-                Command(Mov),
-                Register(R1),
-                Register(R4),
-                Command(Jump),
-                Int(0),
-            ],
-            false,
-            false,
-            true,
-        ) as i16;
-        let loop_condition = f.add_block(
-            vec![
-                Command(Pop),
-                Register(R1),
-                Command(Push),
-                Register(R1),
-                Command(Sub),
-                Register(R1),
-                Int(1),
-                Command(Sub),
-                Register(R1),
-                Register(R4), //is counter same as max
-                Command(JumpZero),
-                Int(loop_end),
-                Register(R1),
-                Command(Load),
-                Int(max_loader_len + 3),
-                Register(R1), //exec::bytecode sector count
-                Command(Add),
-                Register(R3),
-                Register(R1), //base sector+bytecode sector count
-                Command(Sub),
-                Register(R1),
-                Int(1),
-                Command(Sub),
-                Register(R1),
-                Register(R4), //is counter same as ttl bytecode sectors
-                Command(JumpNotZero),
-                Int(data_end),
-                Register(R1),
-                Command(Load),
-                Int(max_loader_len + 2),
-                Register(R1), //bytecode len
-                Command(Add),
-                Int(max_loader_len),
-                Register(R1),
-                Command(Mod),
-                Register(R1),
-                Int(i16::MAX), //bytes in final bytecode sector
-                Command(Push),
-                Register(R2), //dest
-                Command(Push),
-                Register(R1), //len
-                Command(Push),
-                Int(0), //addr
-                Command(Push),
-                Register(R4), //section
-                Command(IO),
-                Int(0),
-                Int(0), //read
-                Command(Add),
-                Register(R1),
-                Register(R2), //inc next_mem
-                Command(Mov),
-                Register(R1),
-                Register(R2),
-                Command(Add),
-                Register(R4),
-                Int(1), //inc counter
-                Command(Mov),
-                Register(R1),
-                Register(R4),
-                Command(Jump),
-                Int(-1), //jump to beinnging
-            ],
-            false,
-            false,
-            true,
-        ) as i16;
-        let delen = f.blocks[data_end as usize].len() - 1;
-        let relen = f.blocks[reg_load as usize].len() - 1;
-        f.blocks[data_end as usize][delen] = loop_condition;
-        f.blocks[reg_load as usize][relen] = loop_condition;
-        f.add_block(
-            vec![
-                Command(Push),
-                Int(0), //dest
-                Command(Push),
-                Int(max_loader_len + 6), //len
-                Command(Push),
-                Int(0), //addr
-                Command(Push),
-                Int(0), //section
-                Command(IO),
-                Int(0),
-                Int(0), //read
-                Command(Load),
-                Int(max_loader_len + 0),
-                Register(R2), //next_mem/exec::mem_offset
-                Command(Sub),
-                Register(R2),
-                Int(max_loader_len),
-                Command(Mov),
-                Register(R1),
-                Register(R2),
-                Command(Load),
-                Int(max_loader_len + 1),
-                Register(R3), //exec::base_sector
-                Command(Load),
-                Int(max_loader_len + 3),
-                Register(R4), //exec::bytecode_sector_count
-                Command(Add),
-                Register(R3),
-                Register(R4),
-                Command(Load),
-                Int(max_loader_len + 5),
-                Register(R4), //exec::data_sector_count
-                Command(Add),
-                Register(R1),
-                Register(R4), //total sectors
-                Command(Push),
-                Register(R1), //save total sectors
-                Command(Mov),
-                Register(R3),
-                Register(R4), //R4 is counter
-                Command(Jump),
-                Int(loop_condition),
-            ],
-            true,
-            false,
-            true,
         );
         f.build(0, &HashMap::new(), 0, &vec![])
     }
@@ -368,7 +208,7 @@ impl Executable {
         let offset = self.data.len();
         self.data.extend(constant);
         self.data_offsets.push(offset as i16);
-        offset
+        self.data_offsets.len() - 1
     }
     pub(crate) fn add_fn(&mut self, mut data: Fn) -> usize {
         let id = self.fns.len();
@@ -378,7 +218,7 @@ impl Executable {
     }
     pub(crate) fn build(mut self, mut offset: usize, disk: &mut Disk) {
         let mut bytecode: Vec<i16> = vec![];
-        let mut fn_map: HashMap<usize, usize> = HashMap::new();
+        let mut fn_map: HashMap<String, usize> = HashMap::new();
         let header_len = 6;
         let insertion_jump_len = 2;
         //loader
@@ -394,12 +234,17 @@ impl Executable {
                 if func.name == "main" {
                     main_loc = acc;
                 }
-                fn_map.insert(i, acc);
-                acc + func.blocks.iter().map(|b| b.len()).sum::<usize>()
+                fn_map.insert(func.name.clone(), acc);
+                acc + func
+                    .blocks
+                    .iter()
+                    .map(|b| func.get_block_len(&b))
+                    .sum::<usize>()
+                    + 2 //entrypoint jump
             }) as i16;
         //bytecode.push(as i16);
         for (i, func) in self.fns.iter_mut().enumerate() {
-            bytecode.extend(func.build(fn_map[&i], &fn_map, data_sec, &self.data_offsets))
+            bytecode.extend(func.build(fn_map[&func.name], &fn_map, data_sec, &self.data_offsets))
         }
 
         Self::insert_bytecode_into_disk(
@@ -497,9 +342,8 @@ impl Executable {
 #[derive(Debug, Clone)]
 pub(crate) struct Fn {
     name: String,
-    blocks: Vec<Vec<i16>>,
-    jumps: Vec<Vec<usize>>,
-    constant_accesses: Vec<Vec<usize>>,
+    blocks: Vec<Vec<Bytecode>>,
+    entrypoint: usize,
     id: usize,
     loc: usize,
 }
@@ -507,101 +351,79 @@ impl Fn {
     pub(crate) fn new(name: String) -> Fn {
         Fn {
             name,
-            blocks: vec![vec![19, 0]],
-            jumps: vec![vec![0]],
-            constant_accesses: vec![vec![]],
+            blocks: vec![],
+            entrypoint: 0,
             id: 0,
             loc: 0,
         }
     }
-    pub(crate) fn add_block(
-        &mut self,
-        block: Vec<Bytecode>,
-        entrypoint: bool,
-        ignore_jumps: bool,
-        ignore_consts: bool,
-    ) -> usize {
-        let mut jumps: Vec<usize> = vec![];
-        let mut constant_usages: Vec<usize> = vec![];
-        let mut loc = 0;
-
-        self.blocks.push(
-            block
-                .iter()
-                .flat_map(|bytecode| {
-                    let r = match bytecode {
-                        Bytecode::Command(c) => {
-                            if !ignore_jumps {
-                                match c {
-                                    CommandType::Jump => jumps.push(loc),
-                                    CommandType::JumpNotZero => jumps.push(loc),
-                                    CommandType::JumpZero => jumps.push(loc),
-                                    CommandType::Call => jumps.push(loc),
-                                    _ => {}
-                                };
-                            }
-                            if !ignore_consts {
-                                match c {
-                                    CommandType::Loadf => constant_usages.push(loc + 1),
-                                    CommandType::Load => constant_usages.push(loc + 1),
-                                    CommandType::Store => constant_usages.push(loc + 1),
-                                    _ => {}
-                                }
-                            }
-                            vec![pack_command(*c)]
-                        }
-                        Bytecode::Float(f) => pack_float(*f),
-                        Bytecode::Int(i) => vec![*i],
-                        Bytecode::Register(r) => pack_register(*r),
-                    };
-                    loc += r.len();
-                    r
-                })
-                .collect(),
-        );
-        self.jumps.push(jumps);
-        self.constant_accesses.push(constant_usages);
+    pub fn new_with_blocks(name: String, blocks: Vec<Vec<Bytecode>>) -> Fn {
+        let mut f = Fn {
+            name,
+            blocks: vec![],
+            entrypoint: 0,
+            id: 0,
+            loc: 0,
+        };
+        for block in blocks {
+            f.add_block(block, false);
+        }
+        f
+    }
+    pub(crate) fn add_block(&mut self, block: Vec<Bytecode>, entrypoint: bool) -> usize {
+        self.blocks.push(block);
         if entrypoint {
-            self.blocks[0][1] = (self.blocks.len() - 1) as i16;
+            self.entrypoint = self.blocks.len() - 1;
         }
         self.blocks.len() - 1
     }
     fn build(
         &mut self,
         pos: usize,
-        fn_map: &HashMap<usize, usize>,
+        fn_map: &HashMap<String, usize>,
         data_sec: i16,
         data_offsets: &Vec<i16>,
     ) -> Vec<i16> {
         let mut block_map: HashMap<usize, usize> = HashMap::new();
         let mut bytecode = Vec::new();
-        self.blocks.iter().enumerate().fold(pos, |acc, (i, b)| {
+        self.blocks.iter().enumerate().fold(pos + 2, |acc, (i, b)| {
             block_map.insert(i, acc);
-            acc + b.len()
+            acc + self.get_block_len(b)
         });
-
+        bytecode.extend_from_slice(&[19, block_map[&(self.entrypoint)] as i16]);
         for (i, block) in self.blocks.iter_mut().enumerate() {
-            let jumps = &self.jumps[i];
-            let constant_usage = &self.constant_accesses[i];
-            jumps.iter().for_each(|j| {
-                let mut jump_loc = block[*j + 1] as i32;
-                if jump_loc == -1 {
-                    jump_loc = i as i32;
-                }
-                block[j + 1] = match convert_int_to_command(block[*j]) {
-                    CommandType::Jump => block_map[&(jump_loc as usize)],
-                    CommandType::JumpNotZero => block_map[&(jump_loc as usize)],
-                    CommandType::JumpZero => block_map[&(jump_loc as usize)],
-                    CommandType::Call => fn_map[&(jump_loc as usize)],
-                    _ => 0,
-                } as i16;
-            });
-            constant_usage.iter().for_each(|constant_loc| {
-                let constant = block[*constant_loc];
-                block[*constant_loc] = data_sec + data_offsets[constant as usize];
-            });
-            bytecode.extend(block.iter().map(|x| *x));
+            let blockCode = flatten_vec(
+                block
+                    .iter()
+                    .map(|inst| match inst {
+                        Command(c) => vec![pack_command(*c)],
+                        Register(r) => pack_register(*r),
+                        Float(f) => pack_float(*f),
+                        Int(i) => vec![*i],
+                        FunctionRef(f) => vec![fn_map[f] as i16],
+                        ConstantLoc(c) => vec![data_sec + data_offsets[*c as usize]],
+                        BlockLoc(b) => vec![block_map[&(*b as usize)] as i16],
+                    })
+                    .collect::<Vec<Vec<i16>>>(),
+            );
+            bytecode.extend(blockCode.iter().map(|x| *x));
         }
         bytecode
+    }
+    fn get_block_len(&self, block: &Vec<Bytecode>) -> usize {
+        block
+            .iter()
+            .map(|inst| match inst {
+                Command(_c) => 1,
+                Register(_r) => 3,
+                Float(_f) => 4,
+                Int(_i) => 1,
+                FunctionRef(_f) => 1,
+                ConstantLoc(_c) => 1,
+                BlockLoc(_b) => 1,
+            })
+            .collect::<Vec<usize>>()
+            .iter()
+            .sum()
     }
 }

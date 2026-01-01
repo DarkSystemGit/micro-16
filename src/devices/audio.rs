@@ -18,15 +18,6 @@ use super::RawDevice;
 pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
     match command {
         0 => {
-            //run()
-            if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
-                audio.run();
-            }
-            if machine.debug {
-                println!("IO.audio.run");
-            }
-        }
-        1 => {
             //pause()
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 audio.pause();
@@ -35,7 +26,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 println!("IO.audio.pause");
             }
         }
-        2 => {
+        1 => {
             //unpause()
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 audio.unpause();
@@ -44,7 +35,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 println!("IO.audio.unpause");
             }
         }
-        3 => {
+        2 => {
             //changeVolume(channel,newVolume)
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 let args = pop_stack(&mut machine.core, 2);
@@ -56,7 +47,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 }
             }
         }
-        4 => {
+        3 => {
             //changePan(channel,newPan)
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 let args = pop_stack(&mut machine.core, 3);
@@ -71,7 +62,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 }
             }
         }
-        5 => {
+        4 => {
             //changeFrequency(channel,newFrequency)
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 let args = pop_stack(&mut machine.core, 2);
@@ -83,7 +74,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 }
             }
         }
-        6 => {
+        5 => {
             //changeMasterVolume(newVolume)
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 let args = pop_stack(&mut machine.core, 1);
@@ -94,7 +85,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 }
             }
         }
-        7 => {
+        6 => {
             //loadSound(channel, ptr, len)
             let args = pop_stack(&mut machine.core, 3);
             let channel = args[0] as usize;
@@ -136,7 +127,7 @@ impl std::fmt::Debug for AudioDevice {
 }
 impl AudioDevice {
     pub fn new() -> AudioDevice {
-        AudioDevice {
+        let mut a = AudioDevice {
             channels: mutex_channels(flatten_vec(vec![
                 gen_uninitialized_channels(gen_square_wave as WaveGenerator, 4, 10.0),
                 gen_uninitialized_channels(gen_triangle_wave as WaveGenerator, 2, 10.0),
@@ -150,7 +141,9 @@ impl AudioDevice {
             old_vol: 1.0,
             master_volume: Arc::new(AtomicI32::new(100)),
             device: None,
-        }
+        };
+        a.run();
+        a
     }
     pub fn update_channel(&self, id: usize, update: ChannelUpdate) {
         modify_channel_collection_item(id, &(self.channels), update);

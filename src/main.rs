@@ -3,9 +3,9 @@ mod executable;
 mod util;
 mod vm;
 use crate::devices::disk::{Disk, DiskSection, DiskSectionType};
-use crate::executable::{Executable, Fn};
+use crate::executable::{Bytecode, Executable, Fn, Library};
 use crate::vm::CommandType::*;
-use crate::vm::{Bytecode, CommandType, Machine};
+use crate::vm::{CommandType, Machine};
 use std::vec;
 use vm::CommandType::{Exit, JumpNotZero, Load, Mov, NOP, Subf};
 fn main() {
@@ -13,7 +13,7 @@ fn main() {
     let mut exe = Executable::new();
     let constant = exe.add_constant(vec![-5, 0]);
     let mut another_fn = Fn::new("another_fn".to_string());
-    let another_block = another_fn.add_block(
+    another_fn.add_block(
         vec![
             Bytecode::Command(Add),
             Bytecode::Int(1),
@@ -24,14 +24,12 @@ fn main() {
             Bytecode::Int(1),
         ],
         true,
-        false,
-        false,
     );
-    let loc = exe.add_fn(another_fn);
+    exe.add_fn(another_fn);
     main_fn.add_block(
         vec![
             Bytecode::Command(Call),
-            Bytecode::Int(loc as i16),
+            Bytecode::FunctionRef("another_fn".to_string()),
             Bytecode::Int(0),
             Bytecode::Command(Pop),
             Bytecode::Register(R1),
@@ -42,18 +40,36 @@ fn main() {
             Bytecode::Float(0.5),
             Bytecode::Register(F1),
             Bytecode::Command(Store),
-            Bytecode::Int(constant as i16),
+            Bytecode::ConstantLoc(constant as i16),
             Bytecode::Register(F1),
             Bytecode::Command(Loadf),
-            Bytecode::Int(constant as i16),
+            Bytecode::ConstantLoc(constant as i16),
             Bytecode::Register(F1),
+            Bytecode::Command(IO),
+            Bytecode::Int(2),
+            Bytecode::Int(0),
+            Bytecode::Command(Call),
+            Bytecode::FunctionRef("testLib::main".to_string()),
+            Bytecode::Int(0),
             Bytecode::Command(Exit),
         ],
         true,
-        false,
-        false,
     );
     exe.add_fn(main_fn);
+    let mut test_lib = Library::new("testLib".to_string());
+    let test_const = test_lib.add_constant(vec![6, 7]);
+    test_lib.add_fn(Fn::new_with_blocks(
+        "main".to_string(),
+        vec![vec![
+            Bytecode::Command(NOP),
+            Bytecode::Command(Load),
+            Bytecode::ConstantLoc(test_const as i16),
+            Bytecode::Register(R1),
+            Bytecode::Command(Return),
+            Bytecode::Int(0),
+        ]],
+    ));
+    test_lib.link(&mut exe);
     let mut disk: Disk = vec![DiskSection {
         section_type: DiskSectionType::Entrypoint,
         id: 0,
