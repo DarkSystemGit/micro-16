@@ -57,7 +57,7 @@ impl Library {
 #[derive(Debug, Clone)]
 pub(crate) struct Executable {
     data: Vec<i16>,
-    data_offsets: Vec<i16>,
+    data_offsets: Vec<usize>,
     fns: Vec<Fn>,
     loader: Vec<i16>,
     max_loader_len: i16,
@@ -207,7 +207,7 @@ impl Executable {
     pub(crate) fn add_constant(&mut self, constant: Vec<i16>) -> usize {
         let offset = self.data.len();
         self.data.extend(constant);
-        self.data_offsets.push(offset as i16);
+        self.data_offsets.push(offset + 1);
         self.data_offsets.len() - 1
     }
     pub(crate) fn add_fn(&mut self, mut data: Fn) -> usize {
@@ -216,7 +216,7 @@ impl Executable {
         self.fns.push(data);
         0
     }
-    pub(crate) fn build(mut self, mut offset: usize, disk: &mut Disk) {
+    pub(crate) fn build(mut self, mut offset: usize, disk: &mut Disk, debug: bool) {
         let mut bytecode: Vec<i16> = vec![];
         let mut fn_map: HashMap<String, usize> = HashMap::new();
         let header_len = 6;
@@ -254,7 +254,50 @@ impl Executable {
             offset,
             main_loc,
             header_len + insertion_jump_len,
+            debug,
         );
+    }
+    fn print_structure(
+        &self,
+        bytecode: &Vec<i16>,
+        offset: usize,
+        header_len: usize,
+        code_sectors: usize,
+        data_sectors: usize,
+        entrypoint: usize,
+    ) {
+        println!("-------Header-------");
+        println!("Offset: {}", offset - header_len);
+        println!(
+            "Base Sector: {}",
+            ((offset - header_len) as f32 / i16::MAX as f32).floor() as usize
+        );
+        println!("Bytecode Len: {}", bytecode.len() + 2);
+        println!("Code Sector Count: {}", code_sectors);
+        println!("Data Len: {}", self.data.len());
+        println!("Data Sector Count: {}", data_sectors);
+        println!("-------Insertion Jump-------");
+        println!("Jump to Entry Point: %{}", entrypoint);
+        println!("-------Bytecode-------");
+        for (i, chunk) in bytecode.chunks(32).map(|slice| slice.to_vec()).enumerate() {
+            println!("{:07}: {:?}", i * 32, chunk);
+        }
+        println!("-------Data-------");
+        for (i, data_offset) in self.data_offsets.iter().enumerate() {
+            let end = if i + 1 <= self.data_offsets.len() - 1 {
+                self.data_offsets[i + 1] as usize
+            } else {
+                self.data.len()
+            };
+            let data = &self.data[*data_offset as usize..end];
+            for (i, chunk) in data.chunks(32).map(|slice| slice.to_vec()).enumerate() {
+                println!(
+                    "{:07}: {:?}",
+                    i * 32 + data_offset + offset + bytecode.len(),
+                    chunk
+                );
+            }
+        }
     }
     fn insert_bytecode_into_disk(
         &self,
@@ -263,10 +306,21 @@ impl Executable {
         mut offset: usize,
         entrypoint: usize,
         header_len: usize,
+        debug: bool,
     ) {
         //(total exe code len/max sector data).ceil()
         let code_sectors = ((offset + bytecode.len()) as f32 / i16::MAX as f32).ceil() as usize;
         let data_sectors = (self.data.len() as f32 / i16::MAX as f32).ceil() as usize;
+        if debug {
+            self.print_structure(
+                &bytecode,
+                offset,
+                header_len,
+                code_sectors,
+                data_sectors,
+                entrypoint,
+            );
+        }
         //[mem offset,base sector,bytecode len,bytecode sector count, data len, data sector count]
         let headers = vec![
             offset - header_len,
@@ -382,7 +436,7 @@ impl Fn {
         pos: usize,
         fn_map: &HashMap<String, usize>,
         data_sec: i16,
-        data_offsets: &Vec<i16>,
+        data_offsets: &Vec<usize>,
     ) -> Vec<i16> {
         let mut block_map: HashMap<usize, usize> = HashMap::new();
         let mut bytecode = Vec::new();
@@ -401,8 +455,14 @@ impl Fn {
                         Float(f) => pack_float(*f),
                         Int(i) => vec![*i],
                         FunctionRef(f) => vec![fn_map[f] as i16],
-                        ConstantLoc(c) => vec![data_sec + data_offsets[*c as usize]],
-                        BlockLoc(b) => vec![block_map[&(*b as usize)] as i16],
+                        ConstantLoc(c) => vec![data_sec + data_offsets[*c as usize] as i16],
+                        BlockLoc(b) => {
+                            if *b != -1 {
+                                vec![block_map[&(*b as usize)] as i16]
+                            } else {
+                                vec![block_map[&(i as usize)] as i16, 0]
+                            }
+                        }
                     })
                     .collect::<Vec<Vec<i16>>>(),
             );

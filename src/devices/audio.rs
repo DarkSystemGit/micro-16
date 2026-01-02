@@ -1,5 +1,6 @@
 use crate::util::flatten_vec;
 use crate::util::pop_stack;
+use crate::util::unpack_float;
 use crate::vm::Machine;
 use arc_swap::{ArcSwap, ArcSwapAny, Guard};
 use hound;
@@ -91,13 +92,17 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
             let channel = args[0] as usize;
             let ptr = args[1] as usize;
             let len = args[2] as usize;
-            let data = machine
-                .memory
-                .read_range(ptr..ptr + len, machine)
-                .to_vec()
+            dbg!(ptr, len, channel);
+            let rdata = machine.memory.read_range(ptr..ptr + len, machine).to_vec();
+            let data: Vec<f32> = rdata
                 .iter()
-                .map(|x| *x as u8)
+                .enumerate()
+                .step_by(2)
+                .map(|(i, x)| {
+                    unpack_float(&[*x, rdata[i + 1]]).expect("Couldn't parse sample float")
+                })
                 .collect();
+            //println!("{:?}", rdata);
             if let RawDevice::Audio(audio) = &mut machine.devices[device_id].contents {
                 audio.update_channel(channel, ChannelUpdate::WaveSample(data));
                 if machine.debug {
@@ -197,7 +202,7 @@ fn mutex_channels(channels: Vec<Channel>) -> ChannelCollection {
             .collect(),
     )
 }
-fn load_wav(bytes: &[u8]) -> Vec<f32> {
+pub fn load_wav(bytes: &[u8]) -> Vec<f32> {
     let mut reader = hound::WavReader::new(Cursor::new(bytes)).expect("Couldn't parse WAV sample");
     let spec = reader.spec();
     let samples: Vec<f32> = match spec.sample_format {
@@ -275,9 +280,7 @@ fn modify_channel_collection_item(id: usize, channels: &ChannelCollection, updat
                 }
                 ChannelUpdate::WaveSample(sample) => {
                     channel.store(Arc::new(Channel::new_with_sample(
-                        load_wav(&sample),
-                        uc.volume,
-                        uc.pan,
+                        sample, uc.volume, uc.pan,
                     )));
                 }
                 _ => {}
@@ -289,7 +292,7 @@ pub enum ChannelUpdate {
     Volume(f32),
     Pan([f32; 2]),
     Frequency(f32),
-    WaveSample(Vec<u8>),
+    WaveSample(Vec<f32>),
 }
 type WaveGenerator = fn(f32, f32) -> f32;
 fn gen_wave(

@@ -217,7 +217,7 @@ fn exec_bytecode(machine: &mut Machine) {
         }
         CommandType::Exit => {
             //exit()
-            machine.core.on = false;
+            machine.on = false;
             if machine.debug {
                 println!("Exit");
             }
@@ -500,6 +500,7 @@ impl Machine {
                             }
                             "stop" => {
                                 self.on = false;
+                                return;
                             }
                             "nextCommand" => {
                                 println!(
@@ -551,7 +552,6 @@ impl Machine {
                 self.panic(self.core.ip);
                 return;
             }
-            self.on = self.core.on;
         }
     }
     pub fn set_disk(&mut self, disk: Disk) {
