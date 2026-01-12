@@ -18,9 +18,9 @@ fn main() {
         .iter()
         .flat_map(|x| convert_float(*x))
         .collect();
-    let file_size = sound_file.len() as f32;
+    let file_size = sound_file.len() as i32;
     let mut another_fn = Fn::new("another_fn".to_string());
-    let another_constant = exe.add_constant(vec![1, 2]) as i16;
+    let another_constant = exe.add_constant(vec![1, 2]);
     another_fn.add_block(
         vec![
             Bytecode::Command(Load),
@@ -59,10 +59,10 @@ fn main() {
             Bytecode::Float(0.5),
             Bytecode::Register(F1),
             Bytecode::Command(Store),
-            Bytecode::ConstantLoc(constant as i16),
+            Bytecode::ConstantLoc(constant),
             Bytecode::Register(F1),
             Bytecode::Command(Loadf),
-            Bytecode::ConstantLoc(constant as i16),
+            Bytecode::ConstantLoc(constant),
             Bytecode::Register(F1),
             Bytecode::Command(IO),
             Bytecode::Int(2),
@@ -71,7 +71,7 @@ fn main() {
             Bytecode::FunctionRef("testLib::main".to_string()),
             Bytecode::Int(0),
             Bytecode::Command(Jump),
-            Bytecode::BlockLoc(do_nothing as i16),
+            Bytecode::BlockLoc(do_nothing),
         ],
         true,
     );
@@ -84,9 +84,9 @@ fn main() {
         vec![vec![
             Bytecode::Command(NOP),
             Bytecode::Command(Push),
-            Bytecode::Float(file_size),
+            Bytecode::Int32(file_size),
             Bytecode::Command(Push),
-            Bytecode::ConstantLoc(sound_sample as i16),
+            Bytecode::ConstantLoc(sound_sample),
             Bytecode::Command(Push),
             Bytecode::Int(9),
             Bytecode::Command(IO),

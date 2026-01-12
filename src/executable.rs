@@ -1,4 +1,4 @@
-use crate::Bytecode::{BlockLoc, Command, ConstantLoc, Float, FunctionRef, Int, Register};
+use crate::Bytecode::{BlockLoc, Command, ConstantLoc, Float, FunctionRef, Int, Int32, Register};
 use crate::CommandType;
 use crate::CommandType::{
     Add, IO, Jump, JumpNotZero, JumpZero, Load, Mod, Mov, Pop, Push, R1, R2, R3, R4, Sub,
@@ -38,7 +38,7 @@ impl Library {
         self.fns.len() - 1
     }
     pub fn link(&self, exe: &mut Executable) {
-        let const_offset = exe.data_offsets.len() as i16;
+        let const_offset = exe.data_offsets.len();
         for constant in &self.constants {
             exe.add_constant(constant.clone());
         }
@@ -52,6 +52,99 @@ impl Library {
             });
             exe.add_fn(func);
         }
+    }
+    pub fn link_lib(&self, lib: &mut Library) {
+        let const_off = lib.constants.len();
+        for constant in &self.constants {
+            lib.add_constant(constant.clone());
+        }
+        for mut func in self.fns.clone() {
+            func.blocks.iter_mut().for_each(|block| {
+                for i in block.iter_mut() {
+                    if let Bytecode::ConstantLoc(constant) = i {
+                        *i = Bytecode::ConstantLoc(*constant + const_off);
+                    }
+                }
+            });
+            lib.add_fn(func);
+        }
+    }
+}
+#[derive(Debug, Clone)]
+struct Symbol {
+    name: String,
+    size: usize,
+    stype: SymbolType,
+}
+#[derive(Debug, Clone, Copy)]
+enum SymbolType {
+    Int16,
+    Int32,
+    Float,
+}
+
+impl Symbol {
+    fn new(name: String, size: usize, stype: SymbolType) -> Symbol {
+        Symbol { name, size, stype }
+    }
+}
+#[derive(Debug, Clone)]
+struct SymbolTable {
+    symbols: Vec<Symbol>,
+}
+impl SymbolTable {
+    pub fn new() -> SymbolTable {
+        SymbolTable {
+            symbols: Vec::new(),
+        }
+    }
+    pub fn add_symbol(&mut self, symbol: Symbol) {
+        self.symbols.push(symbol);
+    }
+    pub fn get_symbol(&self, name: &str) -> usize {
+        let mut c = 0;
+        for symbol in &self.symbols {
+            if symbol.name == name {
+                return c;
+            }
+            c += symbol.size;
+        }
+        panic!("Symbol {} not found", name);
+    }
+    pub fn get_symbol_type(&self, name: &str) -> SymbolType {
+        let mut c = 0;
+        for symbol in &self.symbols {
+            if symbol.name == name {
+                return symbol.stype;
+            }
+            c += symbol.size;
+        }
+        panic!("Symbol {} not found", name);
+    }
+    pub fn len(&self) -> usize {
+        let mut c = 0;
+        for symbol in &self.symbols {
+            c += symbol.size;
+        }
+        c
+    }
+    pub fn setup_stack(&mut self) -> Vec<Bytecode> {
+        vec![
+            Bytecode::Command(CommandType::Push),
+            Bytecode::Register(CommandType::EX1),
+            Bytecode::Command(CommandType::AddEx),
+            Bytecode::Register(CommandType::SRP),
+            Bytecode::Int32(self.len() as i32),
+            Bytecode::Command(Mov),
+            Bytecode::Register(CommandType::EX1),
+            Bytecode::Register(CommandType::SRP),
+            Bytecode::Command(CommandType::SubEx),
+            Bytecode::Register(CommandType::SRP),
+            Bytecode::Int32(self.len() as i32),
+            Bytecode::Command(CommandType::LoadEx),
+            Bytecode::Register(CommandType::EX1),
+            Bytecode::Register(CommandType::EX1),
+        ]
     }
 }
 #[derive(Debug, Clone)]
@@ -69,8 +162,10 @@ pub enum Bytecode {
     Float(f32),
     Int(i16),
     FunctionRef(String),
-    ConstantLoc(i16),
-    BlockLoc(i16),
+    ConstantLoc(usize),
+    BlockLoc(isize),
+    Int32(i32),
+    Symbol(String, i32, CommandType),
 }
 //Bytecode Executable Structure
 //-mem offset
@@ -207,7 +302,7 @@ impl Executable {
     pub(crate) fn add_constant(&mut self, constant: Vec<i16>) -> usize {
         let offset = self.data.len();
         self.data.extend(constant);
-        self.data_offsets.push(offset + 1);
+        self.data_offsets.push(offset);
         self.data_offsets.len() - 1
     }
     pub(crate) fn add_fn(&mut self, mut data: Fn) -> usize {
@@ -220,7 +315,7 @@ impl Executable {
         let mut bytecode: Vec<i16> = vec![];
         let mut fn_map: HashMap<String, usize> = HashMap::new();
         let header_len = 6;
-        let insertion_jump_len = 2;
+        let insertion_jump_len = 5;
         //loader
         offset += self.max_loader_len as usize - 1;
         //headers
@@ -240,8 +335,8 @@ impl Executable {
                     .iter()
                     .map(|b| func.get_block_len(&b))
                     .sum::<usize>()
-                    + 2 //entrypoint jump
-            }) as i16;
+                    + 5 //fn entrypoint jump
+            }) as usize;
         //bytecode.push(as i16);
         for (i, func) in self.fns.iter_mut().enumerate() {
             bytecode.extend(func.build(fn_map[&func.name], &fn_map, data_sec, &self.data_offsets))
@@ -330,7 +425,8 @@ impl Executable {
             self.data.len(),
             data_sectors,
         ];
-        let insertion_jump = vec![pack_command(CommandType::Jump), entrypoint as i16];
+        let mut insertion_jump = vec![pack_command(CommandType::Jump)];
+        insertion_jump.extend_from_slice(&pack_i32(entrypoint as i32));
         let executable = flatten_vec(vec![
             headers.iter().map(|x| *x as i16).collect(),
             insertion_jump.clone(),
@@ -400,6 +496,7 @@ pub(crate) struct Fn {
     entrypoint: usize,
     id: usize,
     loc: usize,
+    symbolTable: SymbolTable,
 }
 impl Fn {
     pub(crate) fn new(name: String) -> Fn {
@@ -409,6 +506,7 @@ impl Fn {
             entrypoint: 0,
             id: 0,
             loc: 0,
+            symbolTable: SymbolTable::new(),
         }
     }
     pub fn new_with_blocks(name: String, blocks: Vec<Vec<Bytecode>>) -> Fn {
@@ -418,33 +516,35 @@ impl Fn {
             entrypoint: 0,
             id: 0,
             loc: 0,
+            symbolTable: SymbolTable::new(),
         };
         for block in blocks {
             f.add_block(block, false);
         }
         f
     }
-    pub(crate) fn add_block(&mut self, block: Vec<Bytecode>, entrypoint: bool) -> usize {
+    pub(crate) fn add_block(&mut self, block: Vec<Bytecode>, entrypoint: bool) -> isize {
         self.blocks.push(block);
         if entrypoint {
             self.entrypoint = self.blocks.len() - 1;
         }
-        self.blocks.len() - 1
+        (self.blocks.len() - 1) as isize
     }
     fn build(
         &mut self,
         pos: usize,
         fn_map: &HashMap<String, usize>,
-        data_sec: i16,
+        data_sec: usize,
         data_offsets: &Vec<usize>,
     ) -> Vec<i16> {
         let mut block_map: HashMap<usize, usize> = HashMap::new();
         let mut bytecode = Vec::new();
-        self.blocks.iter().enumerate().fold(pos + 2, |acc, (i, b)| {
+        self.blocks.iter().enumerate().fold(pos + 5, |acc, (i, b)| {
             block_map.insert(i, acc);
             acc + self.get_block_len(b)
         });
-        bytecode.extend_from_slice(&[19, block_map[&(self.entrypoint)] as i16]);
+        bytecode.push(19);
+        bytecode.extend_from_slice(&pack_i32(block_map[&(self.entrypoint)] as i32));
         for (i, block) in self.blocks.iter_mut().enumerate() {
             let blockCode = flatten_vec(
                 block
@@ -454,14 +554,37 @@ impl Fn {
                         Register(r) => pack_register(*r),
                         Float(f) => pack_float(*f),
                         Int(i) => vec![*i],
-                        FunctionRef(f) => vec![fn_map[f] as i16],
-                        ConstantLoc(c) => vec![data_sec + data_offsets[*c as usize] as i16],
+                        FunctionRef(f) => pack_i32(fn_map[f] as i32),
+                        ConstantLoc(c) => pack_i32((data_sec + data_offsets[*c as usize]) as i32),
                         BlockLoc(b) => {
                             if *b != -1 {
-                                vec![block_map[&(*b as usize)] as i16]
+                                pack_i32(block_map[&(*b as usize)] as i32)
                             } else {
-                                vec![block_map[&(i as usize)] as i16, 0]
+                                pack_i32(block_map[&(i as usize)] as i32)
                             }
+                        }
+                        Int32(i) => pack_i32(*i),
+                        Bytecode::Symbol(name, offset, reg) => {
+                            let stype = self.symbolTable.get_symbol_type(name);
+                            flatten_vec(vec![
+                                vec![pack_command(CommandType::Push)],
+                                pack_register(CommandType::EX1),
+                                vec![pack_command(CommandType::AddEx)],
+                                pack_register(CommandType::ARP),
+                                pack_i32(self.symbolTable.get_symbol(name) as i32),
+                                vec![pack_command(CommandType::AddEx)],
+                                pack_register(CommandType::EX1),
+                                pack_i32(*offset),
+                                vec![pack_command(match stype {
+                                    SymbolType::Float => CommandType::Loadf,
+                                    SymbolType::Int16 => CommandType::Load,
+                                    SymbolType::Int32 => CommandType::LoadEx,
+                                })],
+                                pack_register(CommandType::EX1),
+                                pack_register(*reg),
+                                vec![pack_command(CommandType::Pop)],
+                                pack_register(CommandType::EX1),
+                            ])
                         }
                     })
                     .collect::<Vec<Vec<i16>>>(),
@@ -478,9 +601,11 @@ impl Fn {
                 Register(_r) => 3,
                 Float(_f) => 4,
                 Int(_i) => 1,
-                FunctionRef(_f) => 1,
-                ConstantLoc(_c) => 1,
-                BlockLoc(_b) => 1,
+                FunctionRef(_f) => 4,
+                ConstantLoc(_c) => 4,
+                BlockLoc(_b) => 4,
+                Int32(_i) => 4,
+                Bytecode::Symbol(_s, _o, _r) => 31,
             })
             .collect::<Vec<usize>>()
             .iter()

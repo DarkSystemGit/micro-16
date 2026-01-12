@@ -92,7 +92,7 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
             let channel = args[0] as usize;
             let ptr = args[1] as usize;
             let len = args[2] as usize;
-            dbg!(ptr, len, channel);
+            //dbg!(ptr, len, channel);
             let rdata = machine.memory.read_range(ptr..ptr + len, machine).to_vec();
             let data: Vec<f32> = rdata
                 .iter()

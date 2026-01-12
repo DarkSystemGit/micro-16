@@ -19,7 +19,10 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
     match command {
         0 => {
             if let RawDevice::Clock(clock) = &machine.devices[device_id].contents {
-                machine.core.stack.push(clock.read(), &mut machine.core.srp);
+                machine
+                    .core
+                    .stack
+                    .push(clock.read() as f64, &mut machine.core.srp);
                 if machine.debug {
                     println!("IO.clock.read");
                 }

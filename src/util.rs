@@ -1,3 +1,5 @@
+use std::f64::MAX;
+
 use crate::vm::{CommandType, Core};
 use byteorder::{ByteOrder, LittleEndian};
 
@@ -36,18 +38,18 @@ pub fn convert_float(f: f32) -> Vec<i16> {
         LittleEndian::read_i16(&native[2..4]),
     ]
 }
-pub fn pop_stack(machine: &mut Core, bytes: i32) -> Vec<f32> {
+pub fn pop_stack(machine: &mut Core, bytes: i32) -> Vec<f64> {
     let mut ret = Vec::new();
     for _i in 0..bytes {
         ret.push(machine.stack.pop(&mut machine.srp));
     }
     ret
 }
-pub fn convert_float_or_int_to_bytes(f: f32) -> Vec<i16> {
+pub fn convert_float_or_int_to_bytes(f: f64) -> Vec<i16> {
     if f.fract() == 0.0 {
         vec![f as i16]
     } else {
-        let native = f.to_ne_bytes();
+        let native = f.to_le_bytes();
         vec![
             LittleEndian::read_i16(&native[0..2]),
             LittleEndian::read_i16(&native[2..4]),
@@ -87,6 +89,11 @@ pub fn convert_int_to_command(i: i16) -> CommandType {
         35 => CommandType::Return,
         36 => CommandType::JumpZero,
         37 => CommandType::Loadf,
+        38 => CommandType::LoadEx,
+        39 => CommandType::AddEx,
+        40 => CommandType::SubEx,
+        41 => CommandType::MulEx,
+        42 => CommandType::DivEx,
         _ => CommandType::NOP,
     }
 }
@@ -121,8 +128,18 @@ pub fn pack_command(c: CommandType) -> i16 {
         CommandType::Return => 35,
         CommandType::JumpZero => 36,
         CommandType::Loadf => 37,
+        CommandType::LoadEx => 38,
+        CommandType::AddEx => 39,
+        CommandType::SubEx => 40,
+        CommandType::MulEx => 41,
+        CommandType::DivEx => 42,
         _ => 0,
     }
+}
+pub fn pack_i32(i: i32) -> Vec<i16> {
+    let mut base = vec![i16::MIN, 2];
+    base.extend_from_slice(&convert_i32_to_i16(i));
+    base
 }
 pub fn pack_register(r: CommandType) -> Vec<i16> {
     vec![
@@ -138,35 +155,70 @@ pub fn pack_register(r: CommandType) -> Vec<i16> {
             CommandType::IP => 7,
             CommandType::SP => 8,
             CommandType::SRP => 9,
+            CommandType::EX1 => 10,
+            CommandType::EX2 => 11,
+            CommandType::ARP => 12,
+            CommandType::R5 => 13,
             _ => 0,
         },
     ]
 }
-pub fn convert_reg_byte_to_command(reg: i16, machine: &Core) -> f32 {
+pub fn convert_i16_to_i32(bytes: &[i16]) -> i32 {
+    LittleEndian::read_i32(
+        &(bytes
+            .iter()
+            .flat_map(|x| x.to_le_bytes())
+            .collect::<Vec<u8>>()),
+    )
+}
+pub fn convert_i32_to_i16(bytes: i32) -> [i16; 2] {
+    let native = bytes.to_le_bytes();
+    [
+        LittleEndian::read_i16(&native[0..2]),
+        LittleEndian::read_i16(&native[2..4]),
+    ]
+}
+pub fn get_reg(reg: i16, machine: &Core) -> f64 {
     match reg {
-        1 => machine.r1 as f32,
-        2 => machine.r2 as f32,
-        3 => machine.r3 as f32,
-        4 => machine.r4 as f32,
-        5 => machine.f1,
-        6 => machine.f2,
-        7 => machine.ip as f32,
-        8 => machine.stack.len() as f32,
-        9 => machine.srp as f32,
-        _ => -1.0,
+        1 => machine.r1 as f64,
+        2 => machine.r2 as f64,
+        3 => machine.r3 as f64,
+        4 => machine.r4 as f64,
+        5 => machine.f1 as f64,
+        6 => machine.f2 as f64,
+        7 => machine.ip as f64,
+        8 => machine.stack.len() as f64,
+        9 => machine.srp as f64,
+        10 => convert_i16_to_i32(&[machine.r2, machine.r3]) as f64,
+        11 => convert_i16_to_i32(&[machine.r4, machine.r5]) as f64,
+        12 => machine.arp as f64,
+        13 => machine.r5 as f64,
+        _ => panic!("Invalid register"),
     }
 }
-pub fn set_reg(reg: i16, machine: &mut Core, value: f32) {
+pub fn set_reg(reg: i16, machine: &mut Core, value: f64) {
     match reg {
         1 => machine.r1 = value as i16,
         2 => machine.r2 = value as i16,
         3 => machine.r3 = value as i16,
         4 => machine.r4 = value as i16,
-        5 => machine.f1 = value,
-        6 => machine.f2 = value,
+        5 => machine.f1 = value as f32,
+        6 => machine.f2 = value as f32,
         7 => machine.ip = value as usize,
         8 => machine.stack.resize(value as usize, &mut machine.srp),
         9 => machine.srp = value as usize,
+        10 => {
+            let bytes = (value as i32).to_le_bytes();
+            machine.r2 = LittleEndian::read_i16(&bytes[0..2]);
+            machine.r3 = LittleEndian::read_i16(&bytes[2..4]);
+        }
+        11 => {
+            let bytes = (value as i32).to_le_bytes();
+            machine.r4 = LittleEndian::read_i16(&bytes[0..2]);
+            machine.r5 = LittleEndian::read_i16(&bytes[2..4]);
+        }
+        12 => machine.arp = value as usize,
+        13 => machine.r5 = value as i16,
         _ => (),
     }
 }
