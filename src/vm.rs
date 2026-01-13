@@ -334,7 +334,7 @@ fn exec_bytecode(machine: &mut Machine) {
             //call(fnptr,argcount,...args)
             let cargs = take_bytes(machine, 2);
             let fnargs = take_bytes(machine, cargs[1] as i16);
-            let arp = machine.core.srp;
+            let arp = machine.core.srp + 4 * 1024 * 1024;
             machine
                 .core
                 .stack
@@ -353,8 +353,13 @@ fn exec_bytecode(machine: &mut Machine) {
             }
         }
         CommandType::Return => {
-            //return(returned_byte_count)
-            let args = take_bytes(machine, 1);
+            //return(returned_byte_count,fn_symbol_len)
+            let args = take_bytes(machine, 2);
+            machine.core.stack.pop_range(
+                machine.core.srp - args[0] as usize - args[1] as usize
+                    ..machine.core.srp - args[0] as usize,
+                &mut machine.core.srp,
+            );
             machine.core.ip = machine.core.stack.remove(
                 machine.core.srp - (args[0] as usize + 1),
                 &mut machine.core.srp,
@@ -364,7 +369,7 @@ fn exec_bytecode(machine: &mut Machine) {
                 &mut machine.core.srp,
             ) as usize;
             if machine.debug {
-                println!("Return {}", args[0]);
+                println!("Return {} {}", args[0], args[1]);
             }
         }
         CommandType::NOP => {
@@ -696,7 +701,7 @@ impl Core {
             f1: 0.0,
             f2: 0.0,
             srp: 0,
-            arp: 0,
+            arp: 4 * 1024 * 1024,
             call_stack: vec![0],
         }
     }
@@ -816,7 +821,11 @@ impl Stack {
     pub fn pop(&mut self, srp: &mut usize) -> f64 {
         self.remove(*srp - 1, srp)
     }
-
+    fn pop_range(&mut self, range: std::ops::Range<usize>, srp: &mut usize) {
+        let rlen = range.len();
+        self.data.drain(range);
+        *srp -= rlen;
+    }
     pub fn remove(&mut self, index: usize, srp: &mut usize) -> f64 {
         *srp -= 1;
         self.data.remove(index)

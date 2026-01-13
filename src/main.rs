@@ -11,7 +11,7 @@ use std::{fs, vec};
 use util::{convert_float, unpack_float};
 use vm::CommandType::{Exit, JumpNotZero, Load, Mov, NOP, Subf};
 fn main() {
-    let mut main_fn = Fn::new("main".to_string());
+    let mut main_fn = Fn::new("main".to_string(), 0);
     let mut exe = Executable::new();
     let constant = exe.add_constant(vec![-5, 0]);
     let sound_file: Vec<i16> = load_wav(fs::read("sample.wav").unwrap().as_slice())
@@ -19,7 +19,7 @@ fn main() {
         .flat_map(|x| convert_float(*x))
         .collect();
     let file_size = sound_file.len() as i32;
-    let mut another_fn = Fn::new("another_fn".to_string());
+    let mut another_fn = Fn::new("another_fn".to_string(), 0);
     let another_constant = exe.add_constant(vec![1, 2]);
     another_fn.add_block(
         vec![
@@ -39,10 +39,37 @@ fn main() {
             Bytecode::Register(R1),
             Bytecode::Command(Return),
             Bytecode::Int(1),
+            Bytecode::SymbolSectionLen(),
         ],
         true,
     );
     exe.add_fn(another_fn);
+    let mut symbolLib = Library::new("symbolLib".to_string());
+    let mut symbolfn = Fn::new("symbol".to_string(), 0);
+    symbolfn.add_symbol("testsymbol", 4);
+    symbolfn.add_block(
+        vec![
+            Bytecode::Command(AddEx),
+            Bytecode::Symbol("testsymbol".to_string(), 0),
+            Bytecode::Register(ARP),
+            Bytecode::Command(Store),
+            Bytecode::Register(EX1),
+            Bytecode::Int32(4096),
+            Bytecode::Command(Load),
+            Bytecode::Register(EX1),
+            Bytecode::Register(EX1),
+            Bytecode::Command(AddEx),
+            Bytecode::Register(EX1),
+            Bytecode::Int(1),
+            Bytecode::Command(Push),
+            Bytecode::Register(EX1),
+            Bytecode::Command(Return),
+            Bytecode::Int(1),
+            Bytecode::SymbolSectionLen(),
+        ],
+        true,
+    );
+    symbolLib.add_fn(symbolfn);
     let do_nothing =
         main_fn.add_block(vec![Bytecode::Command(Jump), Bytecode::BlockLoc(-1)], false);
     main_fn.add_block(
@@ -64,6 +91,9 @@ fn main() {
             Bytecode::Command(Loadf),
             Bytecode::ConstantLoc(constant),
             Bytecode::Register(F1),
+            Bytecode::Command(Call),
+            Bytecode::FunctionRef("testLib::symbolLib::symbol".to_string()), //we need to remove symbol slots when returning
+            Bytecode::Int(0),
             Bytecode::Command(IO),
             Bytecode::Int(2),
             Bytecode::Int(0),
@@ -81,6 +111,7 @@ fn main() {
     let sound_sample = test_lib.add_constant(sound_file);
     test_lib.add_fn(Fn::new_with_blocks(
         "main".to_string(),
+        0,
         vec![vec![
             Bytecode::Command(NOP),
             Bytecode::Command(Push),
@@ -94,8 +125,10 @@ fn main() {
             Bytecode::Int(6),
             Bytecode::Command(Return),
             Bytecode::Int(0),
+            Bytecode::SymbolSectionLen(),
         ]],
     ));
+    symbolLib.link_lib(&mut test_lib);
     test_lib.link(&mut exe);
     let mut disk: Disk = vec![DiskSection {
         section_type: DiskSectionType::Entrypoint,
