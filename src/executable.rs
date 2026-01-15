@@ -1,5 +1,6 @@
 use crate::Bytecode::{
-    BlockLoc, Command, ConstantLoc, Float, FunctionRef, Int, Int32, Register, SymbolSectionLen,
+    ArgCount, Argument, BlockLoc, Command, ConstantLoc, Float, FunctionRef, Int, Int32, Register,
+    SymbolSectionLen,
 };
 use crate::CommandType;
 use crate::CommandType::{
@@ -115,8 +116,11 @@ impl SymbolTable {
     pub fn setup_stack(&self) -> Vec<i16> {
         flatten_vec(vec![
             vec![pack_command(CommandType::AddEx)],
-            pack_register(CommandType::SRP),
+            pack_register(CommandType::SP),
             pack_i32(self.len() as i32),
+            vec![pack_command(Mov)],
+            pack_register(CommandType::EX1),
+            pack_register(CommandType::SP),
             vec![pack_command(Mov)],
             pack_register(CommandType::EX1),
             pack_register(CommandType::SRP),
@@ -143,6 +147,8 @@ pub enum Bytecode {
     Int32(i32),
     Symbol(String, i32),
     SymbolSectionLen(),
+    Argument(usize),
+    ArgCount(),
 }
 //Bytecode Executable Structure
 //-mem offset
@@ -571,8 +577,10 @@ impl Fn {
                         Int32(i) => pack_i32(*i),
                         Bytecode::Symbol(name, offset) => {
                             let loc = self.symbol_table.get_symbol(name) as i32 + *offset;
-                            pack_i32(loc)
+                            pack_i32(loc + 2) //arp & return addr
                         }
+                        Argument(arg) => pack_i32((*arg as i32) - (self.arg_count as i32)),
+                        ArgCount() => pack_i32(self.arg_count as i32),
                     })
                     .collect::<Vec<Vec<i16>>>(),
             );
@@ -594,6 +602,8 @@ impl Fn {
                 Int32(_i) => 4,
                 Bytecode::Symbol(_s, _o) => 4,
                 SymbolSectionLen() => 4,
+                Argument(_a) => 4,
+                ArgCount() => 4,
             })
             .collect::<Vec<usize>>()
             .iter()

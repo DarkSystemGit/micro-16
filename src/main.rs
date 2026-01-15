@@ -40,15 +40,23 @@ fn main() {
             Bytecode::Command(Return),
             Bytecode::Int(1),
             Bytecode::SymbolSectionLen(),
+            Bytecode::ArgCount(),
         ],
         true,
     );
     exe.add_fn(another_fn);
     let mut symbolLib = Library::new("symbolLib".to_string());
-    let mut symbolfn = Fn::new("symbol".to_string(), 0);
-    symbolfn.add_symbol("testsymbol", 4);
+    let mut symbolfn = Fn::new("symbol".to_string(), 1);
+    symbolfn.add_symbol("testsymbol", 1);
     symbolfn.add_block(
         vec![
+            Bytecode::Command(AddEx),
+            Bytecode::Register(ARP),
+            Bytecode::Argument(0),
+            Bytecode::Command(Load), //stack gets compressed into i16
+            Bytecode::Register(EX1),
+            Bytecode::Register(EX1),
+            Bytecode::Command(NOP),
             Bytecode::Command(AddEx),
             Bytecode::Symbol("testsymbol".to_string(), 0),
             Bytecode::Register(ARP),
@@ -66,6 +74,7 @@ fn main() {
             Bytecode::Command(Return),
             Bytecode::Int(1),
             Bytecode::SymbolSectionLen(),
+            Bytecode::ArgCount(),
         ],
         true,
     );
@@ -76,7 +85,6 @@ fn main() {
         vec![
             Bytecode::Command(Call),
             Bytecode::FunctionRef("another_fn".to_string()),
-            Bytecode::Int(0),
             Bytecode::Command(Pop),
             Bytecode::Register(R1),
             Bytecode::Command(Mov),
@@ -91,15 +99,18 @@ fn main() {
             Bytecode::Command(Loadf),
             Bytecode::ConstantLoc(constant),
             Bytecode::Register(F1),
+            Bytecode::Command(Push),
+            Bytecode::Int(25),
             Bytecode::Command(Call),
-            Bytecode::FunctionRef("testLib::symbolLib::symbol".to_string()), //we need to remove symbol slots when returning
+            Bytecode::FunctionRef("testLib::symbolLib::symbol".to_string()), //breaks ARP
+            Bytecode::Command(Pop),
+            Bytecode::Register(R1),
             Bytecode::Int(0),
             Bytecode::Command(IO),
             Bytecode::Int(2),
             Bytecode::Int(0),
             Bytecode::Command(Call),
             Bytecode::FunctionRef("testLib::main".to_string()),
-            Bytecode::Int(0),
             Bytecode::Command(Jump),
             Bytecode::BlockLoc(do_nothing),
         ],
@@ -126,6 +137,7 @@ fn main() {
             Bytecode::Command(Return),
             Bytecode::Int(0),
             Bytecode::SymbolSectionLen(),
+            Bytecode::ArgCount(),
         ]],
     ));
     symbolLib.link_lib(&mut test_lib);

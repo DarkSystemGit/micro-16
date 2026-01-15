@@ -325,15 +325,14 @@ fn exec_bytecode(machine: &mut Machine) {
             );
         }
         //[callStack]
+        //...args
         //prev arp
         //returnAddr
-        //...args
         //...vars
         // returnedBytes
         CommandType::Call => {
-            //call(fnptr,argcount,...args)
-            let cargs = take_bytes(machine, 2);
-            let fnargs = take_bytes(machine, cargs[1] as i16);
+            //call(fnptr)
+            let func = take_bytes(machine, 1)[0];
             let arp = machine.core.srp + 4 * 1024 * 1024;
             machine
                 .core
@@ -344,17 +343,14 @@ fn exec_bytecode(machine: &mut Machine) {
                 .core
                 .stack
                 .push(machine.core.ip as f64, &mut machine.core.srp);
-            for i in &fnargs {
-                machine.core.stack.push(*i, &mut machine.core.srp);
-            }
-            machine.core.ip = cargs[0] as usize;
+            machine.core.ip = func as usize;
             if machine.debug {
-                println!("Call %{} Array[len: {},{:?}]", cargs[0], cargs[1], fnargs);
+                println!("Call %{}", func);
             }
         }
         CommandType::Return => {
-            //return(returned_byte_count,fn_symbol_len)
-            let args = take_bytes(machine, 2);
+            //return(returned_byte_count,fn_symbol_len,args)
+            let args = take_bytes(machine, 3);
             machine.core.stack.pop_range(
                 machine.core.srp - args[0] as usize - args[1] as usize
                     ..machine.core.srp - args[0] as usize,
@@ -368,8 +364,12 @@ fn exec_bytecode(machine: &mut Machine) {
                 machine.core.srp - (args[0] as usize + 1),
                 &mut machine.core.srp,
             ) as usize;
+            machine.core.stack.pop_range(
+                machine.core.srp - 1 - args[2] as usize..machine.core.srp - 1,
+                &mut machine.core.srp,
+            );
             if machine.debug {
-                println!("Return {} {}", args[0], args[1]);
+                println!("Return {} {} {}", args[0], args[1], args[2]);
             }
         }
         CommandType::NOP => {
