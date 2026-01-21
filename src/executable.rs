@@ -134,6 +134,7 @@ pub(crate) struct Executable {
     fns: Vec<Fn>,
     loader: Vec<i16>,
     max_loader_len: i16,
+    data_sec: Vec<Data>,
 }
 #[derive(Debug, Clone)]
 pub enum Bytecode {
@@ -150,6 +151,24 @@ pub enum Bytecode {
     Argument(usize),
     ArgCount(),
 }
+#[derive(Debug, Clone)]
+pub enum Data {
+    Bytes(Vec<i16>),
+    Float(f32),
+    Int(i16),
+    Int32(i32),
+    ConstantLoc(usize),
+}
+fn getDataLen(data: Data) -> usize {
+    match data {
+        Data::Bytes(b) => b.len(),
+        Data::Float(_f) => 2,
+        Data::Int(_i) => 1,
+        Data::Int32(_i) => 2,
+        Data::ConstantLoc(_c) => 2,
+    }
+}
+
 //Bytecode Executable Structure
 //-mem offset
 //-base sector
@@ -164,6 +183,7 @@ impl Executable {
         Executable {
             data: Vec::new(),
             data_offsets: Vec::new(),
+            data_sec: Vec::new(),
             fns: Vec::new(),
             //loader loads from base sector to bytecode sector count, taking only bytecode len%i16::MAX for th final sector.
             //Then, it loads from bytecode sector count+1 to bytecode sector count+data_sector count, loading only data len%i16::MAX for the final sector
@@ -316,7 +336,7 @@ impl Executable {
                 fn_map.insert(func.name.clone(), acc);
                 acc + func.len()
             }) as usize;
-        //bytecode.push(as i16);
+        //TODO: handle contant building
         for func in self.fns.iter_mut() {
             bytecode.extend(func.build(fn_map[&func.name], &fn_map, data_sec, &self.data_offsets))
         }

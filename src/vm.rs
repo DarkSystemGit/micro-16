@@ -461,6 +461,11 @@ impl Machine {
         println!("PANIC at %{}", addr);
         println!("__________________________________________");
         println!("State:");
+        self.dump_state();
+        println!("Memory");
+        println!("{:?}", self.memory.data);
+    }
+    pub fn dump_state(&self) {
         println!("Core:");
         println!("IP: {}", self.core.ip);
         println!("Registers:");
@@ -481,8 +486,6 @@ impl Machine {
         for i in 0..self.core.stack.len() {
             println!("%{}: {}", i, self.core.stack.data[i]);
         }
-        println!("Memory");
-        println!("{:?}", self.memory.data);
     }
     pub fn run(&mut self) {
         if let RawDevice::Disk(disk) = &mut self.devices[0].contents {
@@ -720,6 +723,7 @@ impl Memory {
     }
     pub fn read(&self, index: usize, machine: &Machine) -> i16 {
         if index >= self.max_size {
+            //gotta allow multiple bytes
             *machine
                 .core
                 .stack
@@ -742,6 +746,7 @@ impl Memory {
                 );
             }
             let mem_data = self.data[range.start..(self.max_size)].to_vec();
+            //add in ext
             let stackrange = flatten_vec(
                 machine.core.stack.data[0..(range.end - self.max_size)]
                     .to_vec()
@@ -774,6 +779,7 @@ impl Memory {
     }
     pub fn write_range(&mut self, range: Range<usize>, value: Vec<i16>, core: &mut Core) {
         if range.end > self.max_size {
+            //gotta store vals as f64 instead of raw bytes for stack
             if range.end - self.max_size > core.stack.len() {
                 panic!(
                     "Invalid Memory Access: Address %{} is out of bounds",

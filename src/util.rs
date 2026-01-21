@@ -31,8 +31,26 @@ pub fn unpack_float(bytes: &[i16]) -> Option<f32> {
     LittleEndian::write_i16(&mut rbytes[2..4], i16_2);
     Some(f32::from_le_bytes(rbytes))
 }
+pub fn convert_u32_to_i16(val: u32) -> Vec<i16> {
+    let native = val.to_le_bytes();
+    vec![
+        LittleEndian::read_i16(&native[0..2]),
+        LittleEndian::read_i16(&native[2..4]),
+    ]
+}
+pub fn convert_i16_to_u32(bytes: &[i16]) -> Option<u32> {
+    if bytes.len() != 2 {
+        return None;
+    }
+    let i16_1 = bytes[0];
+    let i16_2 = bytes[1];
+    let mut rbytes = [0u8; 4];
+    LittleEndian::write_i16(&mut rbytes[0..2], i16_1);
+    LittleEndian::write_i16(&mut rbytes[2..4], i16_2);
+    Some(u32::from_le_bytes(rbytes))
+}
 pub fn convert_float(f: f32) -> Vec<i16> {
-    let native = f.to_ne_bytes();
+    let native = f.to_le_bytes();
     vec![
         LittleEndian::read_i16(&native[0..2]),
         LittleEndian::read_i16(&native[2..4]),
