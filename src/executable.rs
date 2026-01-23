@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub struct Library {
     name: String,
     fns: Vec<Fn>,
-    pub constants: Vec<Vec<i16>>,
+    pub constants: Vec<Vec<Data>>,
 }
 impl Library {
     pub fn new(name: String) -> Library {
@@ -22,7 +22,7 @@ impl Library {
             constants: vec![],
         }
     }
-    pub fn add_constant(&mut self, constant: Vec<i16>) -> usize {
+    pub fn add_constant(&mut self, constant: Vec<Data>) -> usize {
         self.constants.push(constant);
         self.constants.len() - 1
     }
@@ -41,7 +41,7 @@ impl Library {
         self.fns.len() - 1
     }
     pub fn link(&self, exe: &mut Executable) {
-        let const_offset = exe.data_offsets.len();
+        let const_offset = exe.constants.data_sec.len();
         for constant in &self.constants {
             exe.add_constant(constant.clone());
         }
@@ -129,12 +129,10 @@ impl SymbolTable {
 }
 #[derive(Debug, Clone)]
 pub(crate) struct Executable {
-    data: Vec<i16>,
-    data_offsets: Vec<usize>,
+    constants: ConstantTable,
     fns: Vec<Fn>,
     loader: Vec<i16>,
     max_loader_len: i16,
-    data_sec: Vec<Data>,
 }
 #[derive(Debug, Clone)]
 pub enum Bytecode {
@@ -159,7 +157,7 @@ pub enum Data {
     Int32(i32),
     ConstantLoc(usize),
 }
-fn getDataLen(data: Data) -> usize {
+fn getDataLen(data: &Data) -> usize {
     match data {
         Data::Bytes(b) => b.len(),
         Data::Float(_f) => 2,
@@ -168,7 +166,45 @@ fn getDataLen(data: Data) -> usize {
         Data::ConstantLoc(_c) => 2,
     }
 }
-
+#[derive(Debug, Clone)]
+struct ConstantTable {
+    data_sec: Vec<Vec<Data>>,
+}
+impl ConstantTable {
+    fn new() -> ConstantTable {
+        ConstantTable { data_sec: vec![] }
+    }
+    fn add_constant(&mut self, constant: Vec<Data>) -> usize {
+        self.data_sec.push(constant);
+        self.data_sec.len() - 1
+    }
+    fn get_constant_offset(&self, id: usize) -> usize {
+        let mut offset = 0;
+        for (i, constant) in self.data_sec.iter().enumerate() {
+            if i == id {
+                return offset;
+            }
+            offset += constant.iter().map(|x| getDataLen(x)).sum::<usize>();
+        }
+        return 0;
+    }
+    fn serialize(&self, base: usize) -> Vec<i16> {
+        self.data_sec
+            .concat()
+            .iter()
+            .map(|x| match x {
+                Data::Bytes(b) => b.clone(),
+                Data::ConstantLoc(c) => {
+                    convert_i32_to_i16((self.get_constant_offset(*c) + base) as i32).to_vec()
+                }
+                Data::Float(f) => convert_float(*f),
+                Data::Int32(i) => convert_i32_to_i16(*i).to_vec(),
+                Data::Int(i) => vec![*i],
+            })
+            .flatten()
+            .collect::<Vec<i16>>()
+    }
+}
 //Bytecode Executable Structure
 //-mem offset
 //-base sector
@@ -181,9 +217,7 @@ fn getDataLen(data: Data) -> usize {
 impl Executable {
     pub(crate) fn new() -> Executable {
         Executable {
-            data: Vec::new(),
-            data_offsets: Vec::new(),
-            data_sec: Vec::new(),
+            constants: ConstantTable::new(),
             fns: Vec::new(),
             //loader loads from base sector to bytecode sector count, taking only bytecode len%i16::MAX for th final sector.
             //Then, it loads from bytecode sector count+1 to bytecode sector count+data_sector count, loading only data len%i16::MAX for the final sector
@@ -295,7 +329,7 @@ impl Executable {
             ],
             true,
         );
-        f.build(0, &HashMap::new(), 0, &vec![])
+        f.build(0, &HashMap::new(), 0, &ConstantTable::new())
     }
     fn set_loader(&mut self, loader: Vec<i16>) {
         if loader.len() > self.max_loader_len as usize {
@@ -303,11 +337,8 @@ impl Executable {
         }
         self.loader = loader;
     }
-    pub(crate) fn add_constant(&mut self, constant: Vec<i16>) -> usize {
-        let offset = self.data.len();
-        self.data.extend(constant);
-        self.data_offsets.push(offset);
-        self.data_offsets.len() - 1
+    pub(crate) fn add_constant(&mut self, constant: Vec<Data>) -> usize {
+        self.constants.add_constant(constant)
     }
     pub(crate) fn add_fn(&mut self, mut data: Fn) -> usize {
         let id = self.fns.len();
@@ -338,7 +369,7 @@ impl Executable {
             }) as usize;
         //TODO: handle contant building
         for func in self.fns.iter_mut() {
-            bytecode.extend(func.build(fn_map[&func.name], &fn_map, data_sec, &self.data_offsets))
+            bytecode.extend(func.build(fn_map[&func.name], &fn_map, data_sec, &self.constants))
         }
 
         Self::insert_bytecode_into_disk(
@@ -349,6 +380,7 @@ impl Executable {
             main_loc,
             header_len + insertion_jump_len,
             debug,
+            self.constants.serialize(data_sec),
         );
     }
     fn print_structure(
@@ -368,7 +400,7 @@ impl Executable {
         );
         println!("Bytecode Len: {}", bytecode.len() + 2);
         println!("Code Sector Count: {}", code_sectors);
-        println!("Data Len: {}", self.data.len());
+        println!("Data Len: {}", self.constants.serialize(0).len());
         println!("Data Sector Count: {}", data_sectors);
         println!("-------Insertion Jump-------");
         println!("Jump to Entry Point: %{}", entrypoint);
@@ -377,17 +409,11 @@ impl Executable {
             println!("{:07}: {:?}", i * 32, chunk);
         }
         println!("-------Data-------");
-        for (i, data_offset) in self.data_offsets.iter().enumerate() {
-            let end = if i + 1 <= self.data_offsets.len() - 1 {
-                self.data_offsets[i + 1] as usize
-            } else {
-                self.data.len()
-            };
-            let data = &self.data[*data_offset as usize..end];
+        for (id, data) in self.constants.data_sec.iter().enumerate() {
             for (i, chunk) in data.chunks(32).map(|slice| slice.to_vec()).enumerate() {
                 println!(
-                    "{:07}: {:?}",
-                    i * 32 + data_offset + offset + bytecode.len(),
+                    "Constant {:07}: {:?}",
+                    i * 32 + self.constants.get_constant_offset(id) + offset + bytecode.len(),
                     chunk
                 );
             }
@@ -401,10 +427,11 @@ impl Executable {
         entrypoint: usize,
         header_len: usize,
         debug: bool,
+        data: Vec<i16>,
     ) {
         //(total exe code len/max sector data).ceil()
         let code_sectors = ((offset + bytecode.len()) as f32 / i16::MAX as f32).ceil() as usize;
-        let data_sectors = (self.data.len() as f32 / i16::MAX as f32).ceil() as usize;
+        let data_sectors = (data.len() as f32 / i16::MAX as f32).ceil() as usize;
         if debug {
             self.print_structure(
                 &bytecode,
@@ -421,7 +448,7 @@ impl Executable {
             ((offset - header_len) as f32 / i16::MAX as f32).floor() as usize,
             bytecode.len() + 2,
             code_sectors,
-            self.data.len(),
+            data.len(),
             data_sectors,
         ];
         let mut insertion_jump = vec![pack_command(CommandType::Jump)];
@@ -435,7 +462,7 @@ impl Executable {
         offset -= header_len;
         let base_sector = (offset as f32 / i16::MAX as f32).floor() as usize;
         let bsector_offset = (offset as f32 % i16::MAX as f32) as usize;
-        let data_sector_count = (self.data.len() as f32 / i16::MAX as f32).ceil() as usize;
+        let data_sector_count = (data.len() as f32 / i16::MAX as f32).ceil() as usize;
         for i in base_sector..code_sectors {
             if i == base_sector {
                 let insert_len = match executable.len() < i16::MAX as usize {
@@ -470,14 +497,14 @@ impl Executable {
             );
             let iteration = i - code_sectors;
             let data_start = iteration * i16::MAX as usize;
-            let data_end = match self.data.len() < (iteration + 1) * i16::MAX as usize {
+            let data_end = match data.len() < (iteration + 1) * i16::MAX as usize {
                 false => (iteration + 1) * i16::MAX as usize,
-                true => self.data.len(),
+                true => data.len(),
             };
             disk[i] = DiskSection {
                 section_type: DiskSectionType::Data,
                 id: i as i16,
-                data: self.data[data_start..data_end].to_vec(),
+                data: data[data_start..data_end].to_vec(),
             };
         }
         let mut loader = self.loader.clone();
@@ -552,7 +579,7 @@ impl Fn {
         pos: usize,
         fn_map: &HashMap<String, usize>,
         data_sec: usize,
-        data_offsets: &Vec<usize>,
+        consts: &ConstantTable,
     ) -> Vec<i16> {
         let mut block_map: HashMap<usize, usize> = HashMap::new();
         let mut bytecode = Vec::new();
@@ -586,7 +613,9 @@ impl Fn {
                         Float(f) => pack_float(*f),
                         Int(i) => vec![*i],
                         FunctionRef(f) => pack_i32(fn_map[f] as i32),
-                        ConstantLoc(c) => pack_i32((data_sec + data_offsets[*c as usize]) as i32),
+                        ConstantLoc(c) => {
+                            pack_i32((data_sec + consts.get_constant_offset(*c)) as i32)
+                        }
                         BlockLoc(b) => {
                             if *b != -1 {
                                 pack_i32(block_map[&(*b as usize)] as i32)
