@@ -6,6 +6,7 @@ use crate::util::*;
 use prompted::input;
 use std::ops::Range;
 use std::panic;
+use std::time::{Duration, Instant};
 fn exec_bytecode(machine: &mut Machine) {
     let byte = convert_int_to_command(take_bytes(machine, 1)[0] as i16);
     if machine.debug {
@@ -444,7 +445,8 @@ pub struct Machine {
     pub core: Core,
     pub debug: bool,
     pub memory: Memory,
-    on: bool,
+    pub on: bool,
+    pub freq: (u64, Instant),
 }
 impl Machine {
     pub fn new(debug: bool) -> Machine {
@@ -454,6 +456,7 @@ impl Machine {
             debug,
             on: true,
             memory: Memory::new(4 * 1024 * 1024), //4MB max
+            freq: (0, Instant::now()),
         };
         m
     }
@@ -468,6 +471,10 @@ impl Machine {
     pub fn dump_state(&self) {
         println!("Core:");
         println!("IP: {}", self.core.ip);
+        println!(
+            "Frequency: {:.6}Mhz",
+            self.freq.0 / (self.freq.1.elapsed().as_secs() + 1)
+        );
         println!("Registers:");
         println!("R1: {}", self.core.r1);
         println!("R2: {}", self.core.r2);
@@ -513,6 +520,7 @@ impl Machine {
                     let input = input!("%{}>", self.core.ip);
                     let command = input.split_whitespace().collect::<Vec<&str>>();
                     if command.len() == 0 {
+                        self.freq.0 += 1;
                         exec_bytecode(self)
                     } else {
                         match command[0] {
@@ -536,7 +544,10 @@ impl Machine {
                                     "  readMem - Reads x bytes from an address and displays it"
                                 );
                             }
-                            "step" => exec_bytecode(self),
+                            "step" => {
+                                self.freq.0 += 1;
+                                exec_bytecode(self)
+                            }
                             "dumpMem" => {
                                 let loc = 0;
                                 let mut len = self.memory.len() + 1;
@@ -570,6 +581,7 @@ impl Machine {
                             "debugOff" => {
                                 self.debug = false;
                                 println!("Debug Off");
+                                self.freq.0 += 1;
                                 exec_bytecode(self)
                             }
                             "goto" => {
@@ -583,6 +595,7 @@ impl Machine {
                             }
                             "exitConsole" => {
                                 debug_console = false;
+                                self.freq.0 += 1;
                                 exec_bytecode(self);
                             }
                             "breakpoint" => {
@@ -662,6 +675,7 @@ impl Machine {
                         }
                     }
                 } else {
+                    self.freq.0 += 1;
                     exec_bytecode(self)
                 }
             }));
@@ -717,7 +731,7 @@ pub struct Memory {
 impl Memory {
     fn new(max_size: usize) -> Memory {
         Memory {
-            data: Vec::new(),
+            data: vec![0; max_size],
             max_size,
         }
     }

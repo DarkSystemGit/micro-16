@@ -626,7 +626,11 @@ impl Fn {
                         Int32(i) => pack_i32(*i),
                         Bytecode::Symbol(name, offset) => {
                             let loc = self.symbol_table.get_symbol(name) as i32 + *offset;
-                            pack_i32(loc + 2) //arp & return addr
+                            if self.name != "main" {
+                                pack_i32(loc + 2) //arp & return addr
+                            } else {
+                                pack_i32(loc)
+                            }
                         }
                         Argument(arg) => pack_i32((*arg as i32) - (self.arg_count as i32)),
                         ArgCount() => pack_i32(self.arg_count as i32),

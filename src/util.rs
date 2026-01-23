@@ -1,5 +1,6 @@
 use std::f64::MAX;
 
+use crate::devices::gfx::{Matrix, Point};
 use crate::vm::{CommandType, Core};
 use byteorder::{ByteOrder, LittleEndian};
 
@@ -30,6 +31,43 @@ pub fn unpack_float(bytes: &[i16]) -> Option<f32> {
     LittleEndian::write_i16(&mut rbytes[0..2], i16_1);
     LittleEndian::write_i16(&mut rbytes[2..4], i16_2);
     Some(f32::from_le_bytes(rbytes))
+}
+pub fn gen_rotation_matrix(degrees: f32) -> Matrix {
+    let radians = degrees.to_radians();
+    [
+        [radians.cos(), -(radians.sin())],
+        [radians.sin(), radians.cos()],
+    ]
+}
+pub fn gen_3d_matrix(
+    cam_x: f32,
+    cam_y: f32,
+    cam_z: f32,
+    horizon: f32,
+    rotation: f32,
+    fov: f32,
+    scanlines: usize,
+) -> (Vec<Matrix>, Point) {
+    let mut matrices = Vec::new();
+    let cos_r = rotation.to_radians().cos();
+    let sin_r = rotation.to_radians().sin();
+    for i in 0..scanlines {
+        let screen_y_diff = i as f32 - horizon;
+        if screen_y_diff <= 0.0 {
+            matrices.push([[0.0, 0.0], [0.0, 0.0]]);
+            continue;
+        }
+        // Perspective distance
+        let z = (cam_z * fov) / screen_y_diff;
+        let s = 1.0 / z;
+        let m00 = s * cos_r;
+        let m01 = s * -sin_r;
+        let m10 = s * sin_r;
+        let m11 = s * cos_r;
+
+        matrices.push([[m00, m01], [m10, m11]]);
+    }
+    (matrices, [cam_x as i32, cam_y as i32])
 }
 pub fn convert_u32_to_i16(val: u32) -> Vec<i16> {
     let native = val.to_le_bytes();
