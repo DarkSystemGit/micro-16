@@ -1,4 +1,3 @@
-use crate::Bytecode;
 use crate::devices;
 use crate::devices::disk::Disk;
 use crate::devices::{Device, RawDevice};
@@ -6,7 +5,7 @@ use crate::util::*;
 use prompted::input;
 use std::ops::Range;
 use std::panic;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 fn exec_bytecode(machine: &mut Machine) {
     let byte = convert_int_to_command(take_bytes(machine, 1)[0] as i16);
     if machine.debug {
@@ -147,7 +146,7 @@ fn exec_bytecode(machine: &mut Machine) {
         }
         CommandType::Pop => {
             //pop() -> Register
-            let val = machine.core.stack.pop(&mut machine.core.srp);
+            let val = unpack_dt(machine.core.stack.pop(&mut machine.core.srp));
             let reg = take_registers(machine, 1)[0];
             set_reg(reg, &mut machine.core, val);
             if machine.debug {
@@ -203,11 +202,36 @@ fn exec_bytecode(machine: &mut Machine) {
             }
         }
         CommandType::Push => {
-            //push(f64)
+            //push(i16)
             let args = take_bytes(machine, 1);
-            machine.core.stack.push(args[0], &mut machine.core.srp);
+            machine
+                .core
+                .stack
+                .push(DataType::Int(args[0] as i16), &mut machine.core.srp);
             if machine.debug {
                 println!("Push {}", args[0]);
+            }
+        }
+        CommandType::PushEx => {
+            //pushEx(i32)
+            let args = take_bytes(machine, 1);
+            machine
+                .core
+                .stack
+                .push(DataType::Int32(args[0] as i32), &mut machine.core.srp);
+            if machine.debug {
+                println!("PushEx {}", args[0]);
+            }
+        }
+        CommandType::Pushf => {
+            //pushf(f32)
+            let args = take_bytes(machine, 1);
+            machine
+                .core
+                .stack
+                .push(DataType::Float(args[0] as f32), &mut machine.core.srp);
+            if machine.debug {
+                println!("Pushf {}", args[0]);
             }
         }
         CommandType::Mov => {
@@ -266,30 +290,38 @@ fn exec_bytecode(machine: &mut Machine) {
             }
         }
         CommandType::Store => {
-            //store(address,f32)
+            //store(address,i16)
             let args = take_bytes(machine, 2);
-            if args[1].fract() == 0.0 {
-                if args[1] > i16::MAX as f64 {
-                    machine.memory.write_range(
-                        args[0] as usize..(args[0] + 1.0) as usize,
-                        convert_i32_to_i16(args[1] as i32).to_vec(),
-                        &mut machine.core,
-                    );
-                } else {
-                    machine
-                        .memory
-                        .write(args[0] as usize, args[1] as i16, &mut machine.core);
-                }
-            } else {
-                let f = convert_float(args[1] as f32);
-                machine.memory.write_range(
-                    args[0] as usize..args[0] as usize + f.len(),
-                    f,
-                    &mut machine.core,
-                );
-            }
+            machine
+                .memory
+                .write(args[0] as usize, args[1] as i16, &mut machine.core);
             if machine.debug {
                 println!("Store {} -> %{}", args[1], args[0]);
+            }
+        }
+        CommandType::StoreEx => {
+            //storeEx(address,i32)
+            let args = take_bytes(machine, 2);
+            machine.memory.write_range(
+                args[0] as usize..(args[0] + 1.0) as usize,
+                convert_i32_to_i16(args[1] as i32).to_vec(),
+                &mut machine.core,
+            );
+            if machine.debug {
+                println!("StoreEx {} -> %{}", args[1], args[0]);
+            }
+        }
+        CommandType::Storef => {
+            //storef(address,f32)
+            let args = take_bytes(machine, 2);
+            let f = convert_float(args[1] as f32);
+            machine.memory.write_range(
+                args[0] as usize..args[0] as usize + f.len(),
+                f,
+                &mut machine.core,
+            );
+            if machine.debug {
+                println!("Storef {} -> %{}", args[1], args[0]);
             }
         }
         CommandType::Exit => {
@@ -335,15 +367,15 @@ fn exec_bytecode(machine: &mut Machine) {
             //call(fnptr)
             let func = take_bytes(machine, 1)[0];
             let arp = machine.core.srp + 4 * 1024 * 1024;
-            machine
-                .core
-                .stack
-                .push(machine.core.arp as f64, &mut machine.core.srp);
+            machine.core.stack.push(
+                DataType::Int32(machine.core.arp as i32),
+                &mut machine.core.srp,
+            );
             machine.core.arp = arp;
-            machine
-                .core
-                .stack
-                .push(machine.core.ip as f64, &mut machine.core.srp);
+            machine.core.stack.push(
+                DataType::Int32(machine.core.ip as i32),
+                &mut machine.core.srp,
+            );
             machine.core.ip = func as usize;
             if machine.debug {
                 println!("Call %{}", func);
@@ -357,14 +389,14 @@ fn exec_bytecode(machine: &mut Machine) {
                     ..machine.core.srp - args[0] as usize,
                 &mut machine.core.srp,
             );
-            machine.core.ip = machine.core.stack.remove(
+            machine.core.ip = unpack_dt(machine.core.stack.remove(
                 machine.core.srp - (args[0] as usize + 1),
                 &mut machine.core.srp,
-            ) as usize;
-            machine.core.arp = machine.core.stack.remove(
+            )) as usize;
+            machine.core.arp = unpack_dt(machine.core.stack.remove(
                 machine.core.srp - (args[0] as usize + 1),
                 &mut machine.core.srp,
-            ) as usize;
+            )) as usize;
             machine.core.stack.pop_range(
                 machine.core.srp - 1 - args[2] as usize..machine.core.srp - 1,
                 &mut machine.core.srp,
@@ -465,8 +497,8 @@ impl Machine {
         println!("__________________________________________");
         println!("State:");
         self.dump_state();
-        println!("Memory");
-        println!("{:?}", self.memory.data);
+        //println!("Memory");
+        //println!("{:?}", self.memory.data);
     }
     pub fn dump_state(&self) {
         println!("Core:");
@@ -490,9 +522,7 @@ impl Machine {
         println!("SRP: {}", self.core.srp);
         println!("Stack Pointer: {}", self.core.stack.len());
         println!("Stack Contents:");
-        for i in 0..self.core.stack.len() {
-            println!("%{}: {}", i, self.core.stack.data[i]);
-        }
+        self.core.stack.dump();
     }
     pub fn run(&mut self) {
         if let RawDevice::Disk(disk) = &mut self.devices[0].contents {
@@ -703,7 +733,6 @@ pub struct Core {
     pub f2: f32,
     pub srp: usize,
     pub arp: usize,
-    call_stack: Vec<usize>,
 }
 impl Core {
     fn new() -> Core {
@@ -719,7 +748,6 @@ impl Core {
             f2: 0.0,
             srp: 0,
             arp: 4 * 1024 * 1024,
-            call_stack: vec![0],
         }
     }
 }
@@ -738,50 +766,21 @@ impl Memory {
     pub fn read(&self, index: usize, machine: &Machine) -> i16 {
         if index >= self.max_size {
             //gotta allow multiple bytes
-            *machine
-                .core
-                .stack
-                .data
-                .get(index - self.max_size)
-                .expect(&format!(
-                    "Invalid Memory Access: Address %{} is out of bounds",
-                    index
-                )) as i16
+            machine.core.stack.read_bytes(index - self.max_size, 1)[0]
         } else {
             self.data.get(index).copied().unwrap_or(0)
         }
     }
     pub fn read_range(&self, range: Range<usize>, machine: &Machine) -> Vec<i16> {
-        if range.end > self.max_size {
-            if (range.end - self.max_size) >= machine.core.stack.data.len() {
-                panic!(
-                    "Invalid Memory Access: Address %{} is out of bounds",
-                    machine.core.stack.data.len()
-                );
-            }
-            let mem_data = self.data[range.start..(self.max_size)].to_vec();
-            //add in ext
-            let stackrange = flatten_vec(
-                machine.core.stack.data[0..(range.end - self.max_size)]
-                    .to_vec()
-                    .iter()
-                    .map(|x| convert_float_or_int_to_bytes(*x))
-                    .collect(),
-            );
-            [mem_data, stackrange].concat();
+        let mut result = Vec::new();
+        for i in range {
+            result.push(self.read(i, machine));
         }
-        self.data[range].to_vec()
+        result
     }
     pub fn write(&mut self, index: usize, value: i16, core: &mut Core) {
         if index >= self.max_size {
-            *core
-                .stack
-                .data
-                .get_mut(index - self.max_size)
-                .expect(&format!(
-                    "Invalid Memory Access: Address %{} is out of bounds",
-                    index
-                )) = value as f64;
+            core.stack.write_bytes(index - self.max_size, vec![value])
         } else {
             if index < self.data.len() {
                 self.data[index] = value;
@@ -792,37 +791,49 @@ impl Memory {
         }
     }
     pub fn write_range(&mut self, range: Range<usize>, value: Vec<i16>, core: &mut Core) {
-        if range.end > self.max_size {
-            //gotta store vals as f64 instead of raw bytes for stack
-            if range.end - self.max_size > core.stack.len() {
-                panic!(
-                    "Invalid Memory Access: Address %{} is out of bounds",
-                    self.max_size + core.stack.len()
-                );
-            }
-            self.data[range.start..self.max_size]
-                .copy_from_slice(&value[0..self.max_size - range.start]);
-            core.stack.data[0..(range.end - self.max_size)].copy_from_slice(
-                value[self.max_size - range.start..]
-                    .to_vec()
-                    .iter()
-                    .map(|x| *x as f64)
-                    .collect::<Vec<f64>>()
-                    .as_slice(),
-            );
+        for (i, v) in range.zip(value) {
+            self.write(i, v, core);
         }
-        if range.end > self.data.len() {
-            self.data.resize(range.end, 0);
-        }
-        self.data[range].copy_from_slice(&value);
     }
     pub fn len(&self) -> usize {
         self.data.len()
     }
 }
+#[derive(Debug, Clone, Copy)]
+pub enum DataType {
+    Float(f32),
+    Int(i16),
+    Int32(i32),
+    None,
+}
 #[derive(Debug)]
 pub struct Stack {
-    data: Vec<f64>,
+    data: Vec<DataType>,
+}
+
+pub fn unpack_dt(i: DataType) -> f64 {
+    match i {
+        DataType::Float(f) => f as f64,
+        DataType::Int(i) => i as f64,
+        DataType::Int32(e) => e as f64,
+        _ => 0.0,
+    }
+}
+fn unpack_dt_to_bytes(i: DataType) -> Vec<i16> {
+    match i {
+        DataType::Float(f) => convert_float(f),
+        DataType::Int(i) => vec![i],
+        DataType::Int32(e) => convert_i32_to_i16(e).to_vec(),
+        _ => vec![0],
+    }
+}
+fn dt_size(i: DataType) -> usize {
+    match i {
+        DataType::Float(_f) => 2,
+        DataType::Int32(_i) => 2,
+        DataType::Int(_i) => 1,
+        DataType::None => 1,
+    }
 }
 impl Stack {
     fn new() -> Stack {
@@ -831,22 +842,91 @@ impl Stack {
     pub fn len(&self) -> usize {
         self.data.len()
     }
-    pub fn push(&mut self, x: f64, srp: &mut usize) {
+
+    pub fn dump(&self) {
+        self.data
+            .chunks(16)
+            .enumerate()
+            .for_each(|(i, x)| println!("%{}: {:?}", i, x));
+    }
+    pub fn push(&mut self, x: DataType, srp: &mut usize) {
         if *srp >= self.data.len() {
-            self.data.resize(*srp, 0.0);
+            self.data.resize(*srp, DataType::None);
         }
         self.data.insert(*srp, x);
         *srp += 1;
     }
-    pub fn pop(&mut self, srp: &mut usize) -> f64 {
+    fn convert_byte_index_to_stack(&self, byte_index: usize) -> (usize, usize) {
+        let mut byte_count = 0;
+        for (i, dt) in self.data.iter().enumerate() {
+            let size = dt_size(*dt);
+            if byte_count + size > byte_index {
+                return (i, byte_index - byte_count);
+            }
+            byte_count += size;
+        }
+        (0, 0)
+    }
+    pub fn read_bytes(&self, byte_index: usize, len: usize) -> Vec<i16> {
+        let mut bytes = Vec::new();
+        for i in byte_index..byte_index + len {
+            let (index, offset) = self.convert_byte_index_to_stack(i);
+            bytes.push(
+                unpack_dt_to_bytes(
+                    *self
+                        .data
+                        .get(index)
+                        .expect(format!("Failed to get index {} of stack", index).as_str()),
+                )[offset],
+            );
+        }
+        bytes
+    }
+    pub fn write_bytes(&mut self, byte_index: usize, bytes: Vec<i16>) {
+        for i in byte_index..byte_index + bytes.len() {
+            let (index, offset) = self.convert_byte_index_to_stack(i);
+
+            *self
+                .data
+                .get_mut(index)
+                .expect(format!("Failed to get index {} of stack", index).as_str()) =
+                match *self
+                    .data
+                    .get(index)
+                    .expect(format!("Failed to get index {} of stack", index).as_str())
+                {
+                    DataType::Int(_i) => DataType::Int(bytes[i - byte_index]),
+                    DataType::Float(_f) => {
+                        let mut unpacked =
+                            unpack_dt_to_bytes(*self.data.get(index).expect(
+                                format!("Failed to get index {} of stack", index).as_str(),
+                            ));
+                        unpacked[offset] = bytes[i - byte_index];
+                        DataType::Float(
+                            unpack_float(unpacked.as_slice()).expect("Couldn't write to stack"),
+                        )
+                    }
+                    DataType::Int32(_e) => {
+                        let mut unpacked =
+                            unpack_dt_to_bytes(*self.data.get(index).expect(
+                                format!("Failed to get index {} of stack", index).as_str(),
+                            ));
+                        unpacked[offset] = bytes[i - byte_index];
+                        DataType::Int32(convert_i16_to_i32(unpacked.as_slice()))
+                    }
+                    _ => DataType::Int(bytes[i - byte_index]),
+                };
+        }
+    }
+    pub fn pop(&mut self, srp: &mut usize) -> DataType {
         self.remove(*srp - 1, srp)
     }
-    fn pop_range(&mut self, range: std::ops::Range<usize>, srp: &mut usize) {
+    pub fn pop_range(&mut self, range: std::ops::Range<usize>, srp: &mut usize) {
         let rlen = range.len();
         self.data.drain(range);
         *srp -= rlen;
     }
-    pub fn remove(&mut self, index: usize, srp: &mut usize) -> f64 {
+    pub fn remove(&mut self, index: usize, srp: &mut usize) -> DataType {
         *srp -= 1;
         self.data.remove(index)
     }
@@ -854,7 +934,7 @@ impl Stack {
         if size <= self.data.len() {
             *srp = size;
         }
-        self.data.resize(size, 0.0);
+        self.data.resize(size, DataType::None);
     }
 }
 
@@ -879,10 +959,14 @@ pub enum CommandType {
     Or,
     Xor,
     Push,
+    Pushf,
+    PushEx,
     Pop,
     Load,
     LoadEx,
     Store,
+    StoreEx,
+    Storef,
     Mov,
     Jump,
     JumpNotZero,

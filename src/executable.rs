@@ -3,9 +3,7 @@ use crate::Bytecode::{
     SymbolSectionLen,
 };
 use crate::CommandType;
-use crate::CommandType::{
-    Add, IO, Jump, JumpNotZero, JumpZero, Load, Mod, Mov, Pop, Push, R1, R2, R3, R4, Sub,
-};
+use crate::CommandType::{Add, IO, Jump, Load, Mov, Push, R1, R2, R3};
 use crate::devices::disk::{Disk, DiskSection, DiskSectionType};
 use crate::util::*;
 use std::collections::HashMap;
@@ -157,7 +155,7 @@ pub enum Data {
     Int32(i32),
     ConstantLoc(usize),
 }
-fn getDataLen(data: &Data) -> usize {
+fn get_data_len(data: &Data) -> usize {
     match data {
         Data::Bytes(b) => b.len(),
         Data::Float(_f) => 2,
@@ -184,7 +182,7 @@ impl ConstantTable {
             if i == id {
                 return offset;
             }
-            offset += constant.iter().map(|x| getDataLen(x)).sum::<usize>();
+            offset += constant.iter().map(|x| get_data_len(x)).sum::<usize>();
         }
         return 0;
     }
@@ -356,17 +354,13 @@ impl Executable {
         //headers
         offset += header_len + insertion_jump_len;
         let mut main_loc = 0;
-        let data_sec = self
-            .fns
-            .iter_mut()
-            .enumerate()
-            .fold(offset + 1, |acc, (i, func)| {
-                if func.name == "main" {
-                    main_loc = acc;
-                }
-                fn_map.insert(func.name.clone(), acc);
-                acc + func.len()
-            }) as usize;
+        let data_sec = self.fns.iter_mut().fold(offset + 1, |acc, func| {
+            if func.name == "main" {
+                main_loc = acc;
+            }
+            fn_map.insert(func.name.clone(), acc);
+            acc + func.len()
+        }) as usize;
         //TODO: handle contant building
         for func in self.fns.iter_mut() {
             bytecode.extend(func.build(fn_map[&func.name], &fn_map, data_sec, &self.constants))
@@ -565,8 +559,8 @@ impl Fn {
     fn len(&self) -> usize {
         self
             .blocks
-            .iter().enumerate()
-            .map(|(i,b)| self.get_block_len(&b,i))
+            .iter()
+            .map(|b| self.get_block_len(&b))
             .sum::<usize>()
             + 5//entrypoint jump
             + match self.symbol_enabled {
@@ -595,7 +589,7 @@ impl Fn {
             .enumerate()
             .fold(pos + 5 + symbol_tbl_len, |acc, (i, b)| {
                 block_map.insert(i, acc);
-                acc + self.get_block_len(b, i)
+                acc + self.get_block_len(b)
             });
         bytecode.push(19);
         bytecode.extend_from_slice(&pack_i32(block_map[&(self.entrypoint)] as i32));
@@ -603,8 +597,7 @@ impl Fn {
             let block_code = flatten_vec(
                 block
                     .iter()
-                    .enumerate()
-                    .map(|(j, inst)| match inst {
+                    .map(|inst| match inst {
                         Command(c) => match c {
                             _ => vec![pack_command(*c)],
                         },
@@ -627,7 +620,7 @@ impl Fn {
                         Bytecode::Symbol(name, offset) => {
                             let loc = self.symbol_table.get_symbol(name) as i32 + *offset;
                             if self.name != "main" {
-                                pack_i32(loc + 2) //arp & return addr
+                                pack_i32(loc + 4) //arp & return addr
                             } else {
                                 pack_i32(loc)
                             }
@@ -641,7 +634,7 @@ impl Fn {
         }
         bytecode
     }
-    fn get_block_len(&self, block: &Vec<Bytecode>, idx: usize) -> usize {
+    fn get_block_len(&self, block: &Vec<Bytecode>) -> usize {
         block
             .iter()
             .map(|inst| match inst {

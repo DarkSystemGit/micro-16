@@ -1,7 +1,5 @@
-use std::f64::MAX;
-
 use crate::devices::gfx::{Matrix, Point};
-use crate::vm::{CommandType, Core};
+use crate::vm::{CommandType, Core, unpack_dt};
 use byteorder::{ByteOrder, LittleEndian};
 
 pub fn resize_vec<T>(len: usize, vec: &mut Vec<T>, fill: T)
@@ -97,21 +95,11 @@ pub fn convert_float(f: f32) -> Vec<i16> {
 pub fn pop_stack(machine: &mut Core, bytes: i32) -> Vec<f64> {
     let mut ret = Vec::new();
     for _i in 0..bytes {
-        ret.push(machine.stack.pop(&mut machine.srp));
+        ret.push(unpack_dt(machine.stack.pop(&mut machine.srp)));
     }
     ret
 }
-pub fn convert_float_or_int_to_bytes(f: f64) -> Vec<i16> {
-    if f.fract() == 0.0 {
-        vec![f as i16]
-    } else {
-        let native = f.to_le_bytes();
-        vec![
-            LittleEndian::read_i16(&native[0..2]),
-            LittleEndian::read_i16(&native[2..4]),
-        ]
-    }
-}
+
 pub fn convert_int_to_command(i: i16) -> CommandType {
     match i {
         32 => CommandType::Add,
@@ -150,6 +138,10 @@ pub fn convert_int_to_command(i: i16) -> CommandType {
         40 => CommandType::SubEx,
         41 => CommandType::MulEx,
         42 => CommandType::DivEx,
+        43 => CommandType::Pushf,
+        44 => CommandType::PushEx,
+        45 => CommandType::StoreEx,
+        46 => CommandType::Storef,
         _ => CommandType::NOP,
     }
 }
@@ -189,6 +181,10 @@ pub fn pack_command(c: CommandType) -> i16 {
         CommandType::SubEx => 40,
         CommandType::MulEx => 41,
         CommandType::DivEx => 42,
+        CommandType::Pushf => 43,
+        CommandType::PushEx => 44,
+        CommandType::StoreEx => 45,
+        CommandType::Storef => 46,
         _ => 0,
     }
 }

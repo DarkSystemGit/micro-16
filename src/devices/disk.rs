@@ -13,7 +13,6 @@ pub enum DiskSectionType {
     Entrypoint,
     Libary,
     Code,
-    Loader,
     Data,
 }
 pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {

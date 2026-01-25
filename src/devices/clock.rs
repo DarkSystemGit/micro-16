@@ -1,5 +1,5 @@
 use crate::devices::RawDevice;
-use crate::vm::Machine;
+use crate::vm::{DataType, Machine};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Debug)]
 pub struct Clock {}
@@ -22,12 +22,15 @@ pub fn driver(machine: &mut Machine, command: i16, device_id: usize) {
                 machine
                     .core
                     .stack
-                    .push(clock.read() as f64, &mut machine.core.srp);
+                    .push(DataType::Float(clock.read()), &mut machine.core.srp);
                 if machine.debug {
                     println!("IO.clock.read");
                 }
             } else {
-                machine.core.stack.push(0.0, &mut machine.core.srp);
+                machine
+                    .core
+                    .stack
+                    .push(DataType::Float(0.0), &mut machine.core.srp);
             }
         }
         _ => {}

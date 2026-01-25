@@ -2,7 +2,7 @@ use crate::util::flatten_vec;
 use crate::util::pop_stack;
 use crate::util::unpack_float;
 use crate::vm::Machine;
-use arc_swap::{ArcSwap, ArcSwapAny, Guard};
+use arc_swap::{ArcSwap, ArcSwapAny};
 use hound;
 use std::{
     io::Cursor,
@@ -153,9 +153,7 @@ impl AudioDevice {
     pub fn update_channel(&self, id: usize, update: ChannelUpdate) {
         modify_channel_collection_item(id, &(self.channels), update);
     }
-    pub fn read_channel(&self, id: usize) -> Guard<Arc<Channel>> {
-        get_channel_collection_item(id, &(self.channels))
-    }
+
     pub fn set_master_volume(&self, volume: i32) {
         self.master_volume.store(volume, Relaxed);
     }
@@ -225,12 +223,7 @@ pub fn load_wav(bytes: &[u8]) -> Vec<f32> {
         samples
     }
 }
-fn get_channel_collection_item(id: usize, channels: &ChannelCollection) -> Guard<Arc<Channel>> {
-    channels
-        .get(id)
-        .map(|c| c.load())
-        .expect("Couldn't find channel")
-}
+
 fn modify_channel_collection_item(id: usize, channels: &ChannelCollection, update: ChannelUpdate) {
     if let Some(channel) = channels.get(id) {
         let uc = channel.load();
@@ -320,7 +313,7 @@ fn gen_wave(
                 } else if let Some(sample) = &channel.wave_sample {
                     channel_clocks[i] = (channel_clocks[i] + 1.0) % sample.len() as f32;
                 }
-                let raw_val = channel.play(channel_clocks[i], sample_rate);
+                let raw_val = channel.play(channel_clocks[i]);
                 value_l += raw_val * channel.pan[0];
                 value_r += raw_val * channel.pan[1];
             }
@@ -378,7 +371,7 @@ impl Channel {
             wave_sample: Some(sample),
         }
     }
-    fn play(&self, phase: f32, sample_rate: u32) -> f32 {
+    fn play(&self, phase: f32) -> f32 {
         if let Some(wave_func) = self.wave {
             wave_func(phase, self.volume)
         } else if let Some(sample) = &self.wave_sample {
